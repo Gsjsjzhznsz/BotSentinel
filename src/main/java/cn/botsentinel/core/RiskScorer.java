@@ -1,4 +1,4 @@
-package cn.botsentinel;
+package cn.botsentinel.core;
 
 import java.util.Locale;
 
@@ -24,10 +24,8 @@ public class RiskScorer {
         public String reason;       // 决策说明
     }
 
-    private final BotSentinelPlugin plugin;
-
-    public RiskScorer(BotSentinelPlugin plugin) {
-        this.plugin = plugin;
+    /** core 版无插件依赖(仅名字随机性评分); mod 端自行组合其他信号 */
+    public RiskScorer() {
     }
 
     /** 名字随机性 0-95 (仅看名字本身) */
@@ -139,57 +137,5 @@ public class RiskScorer {
             } else inUpper = false;
         }
         return islands;
-    }
-
-    /** 综合评估(进服前) */
-    public Result evaluate(String name, String ip) {
-        Result r = new Result();
-        r.randomness = randomness(name);
-
-        LibraryStore lib = plugin.library();
-
-        // 形态库命中(同一生成器)
-        double shapeConf = lib.shapeConfidence(name);
-        if (shapeConf >= 0.3) r.shapeBonus = (int) Math.min(45, 45 * shapeConf);
-
-        // IP 侧: 精确IP信誉 + 网段信誉 + 窗口内新账号数
-        double ipConf = lib.ipConfidence(ip);
-        double prefixConf = plugin.config().prefixLearn ? lib.ipPrefixConfidence(ip) : 0;
-        int windowCount = plugin.ipTracker().newNameCount(ip);
-        int windowBonus;
-        if (windowCount >= 5) windowBonus = 45;
-        else if (windowCount >= 3) windowBonus = 35;
-        else if (windowCount == 2) windowBonus = 20;
-        else if (windowCount == 1) windowBonus = 10;
-        else windowBonus = 0;
-        r.ipBonus = (int) Math.min(45, ipConf * 40 + prefixConf * 20 + windowBonus);
-
-        // 信任减免
-        if (lib.isVerifiedPlayer(name)) r.trustDiscount = 999;
-        else if (plugin.isWhitelisted(name)) r.trustDiscount = 999;
-        else if (lib.isSeededPlayer(name)) r.trustDiscount = 20;
-
-        r.score = Math.max(0, r.randomness + r.shapeBonus + r.ipBonus - r.trustDiscount);
-
-        boolean trusted = r.trustDiscount >= 999;
-        boolean knownBot = lib.isKnownBotName(name);
-
-        if (trusted) {
-            r.reason = "已登记真人, 直接放行";
-        } else if (knownBot) {
-            r.block = true;
-            r.reason = "命中假人名特征库";
-        } else if (plugin.mode() == Config.Mode.BLOCK
-                && r.score >= plugin.config().blockThreshold
-                && r.randomness >= plugin.config().minNameRandomness) {
-            r.block = true;
-            r.reason = "评分" + r.score + " (随机" + r.randomness + "+形态" + r.shapeBonus + "+IP" + r.ipBonus + ")";
-        } else if (r.score >= plugin.config().observeThreshold && r.randomness >= 35) {
-            r.observe = true;
-            r.reason = "评分" + r.score + " (随机" + r.randomness + "+形态" + r.shapeBonus + "+IP" + r.ipBonus + ")";
-        } else {
-            r.reason = "评分" + r.score + ", 放行";
-        }
-        return r;
     }
 }

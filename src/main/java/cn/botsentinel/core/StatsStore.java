@@ -1,4 +1,4 @@
-package cn.botsentinel;
+package cn.botsentinel.core;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;

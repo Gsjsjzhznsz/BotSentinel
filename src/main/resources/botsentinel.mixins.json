@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "cn.botsentinel.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "server": [
+    "PlayerManagerMixin",
+    "ServerPlayNetworkHandlerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "botsentinel",
+  "version": "${version}",
+  "name": "BotSentinel",
+  "description": "无感风控反机器人 mod: 进服前拦截(QQ群零感知) + 特征库自动更新 + 真人封禁网段追踪 + IP归属地拦截",
+  "authors": [
+    "Gsjsjzhznsz"
+  ],
+  "contact": {
+    "homepage": "https://github.com/Gsjsjzhznsz/BotSentinel",
+    "sources": "https://github.com/Gsjsjzhznsz/BotSentinel/tree/fabric"
+  },
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "server": [
+      "cn.botsentinel.fabric.BotSentinelMod"
+    ]
+  },
+  "mixins": [
+    "botsentinel.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.4",
+    "java": ">=21"
+  }
+}

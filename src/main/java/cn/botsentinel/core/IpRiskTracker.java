@@ -1,4 +1,4 @@
-package cn.botsentinel;
+package cn.botsentinel.core;
 
 import java.util.Locale;
 import java.util.Map;
@@ -21,16 +21,15 @@ public class IpRiskTracker {
 
     private final Map<String, Window> windows = new ConcurrentHashMap<>();
     private final Map<String, Window> flashWindows = new ConcurrentHashMap<>();
-    private final BotSentinelPlugin plugin;
+    private final long windowMs;
 
-    public IpRiskTracker(BotSentinelPlugin plugin) {
-        this.plugin = plugin;
+    public IpRiskTracker(long windowMinutes) {
+        this.windowMs = Math.max(1, windowMinutes) * 60000L;
     }
 
     /** 记录一个新账号登录(未被信任的名字); 返回窗口内当前计数 */
     public int recordNewName(String ip, String name) {
         if (ip == null) return 0;
-        long windowMs = plugin.config().windowMinutes * 60000L;
         Window w = windows.computeIfAbsent(ip.toLowerCase(Locale.ROOT), k -> new Window());
         synchronized (w) {
             long now = System.currentTimeMillis();
@@ -45,7 +44,6 @@ public class IpRiskTracker {
         if (ip == null) return 0;
         Window w = windows.get(ip.toLowerCase(Locale.ROOT));
         if (w == null) return 0;
-        long windowMs = plugin.config().windowMinutes * 60000L;
         synchronized (w) {
             long now = System.currentTimeMillis();
             while (!w.stamps.isEmpty() && now - w.stamps.peekFirst() > windowMs) w.stamps.pollFirst();
@@ -56,7 +54,6 @@ public class IpRiskTracker {
     /** 记录一次"闪进闪退"(停留 < 20 秒即断开); 返回窗口内计数 */
     public int recordFlashQuit(String ip) {
         if (ip == null) return 0;
-        long windowMs = plugin.config().windowMinutes * 60000L;
         Window w = flashWindows.computeIfAbsent(ip.toLowerCase(Locale.ROOT), k -> new Window());
         synchronized (w) {
             long now = System.currentTimeMillis();
@@ -71,7 +68,6 @@ public class IpRiskTracker {
         if (ip == null) return 0;
         Window w = flashWindows.get(ip.toLowerCase(Locale.ROOT));
         if (w == null) return 0;
-        long windowMs = plugin.config().windowMinutes * 60000L;
         synchronized (w) {
             long now = System.currentTimeMillis();
             while (!w.stamps.isEmpty() && now - w.stamps.peekFirst() > windowMs) w.stamps.pollFirst();
@@ -80,7 +76,6 @@ public class IpRiskTracker {
     }
 
     public void cleanup() {
-        long windowMs = plugin.config().windowMinutes * 60000L;
         long now = System.currentTimeMillis();
         for (Map.Entry<String, Window> en : windows.entrySet()) {
             synchronized (en.getValue()) {

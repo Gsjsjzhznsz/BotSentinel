@@ -1,4 +1,4 @@
-package cn.botsentinel;
+package cn.botsentinel.core;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
