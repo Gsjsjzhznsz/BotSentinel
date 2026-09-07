@@ -1,0 +1,7 @@
+Java Launcher: /home/z/my-project/tools/jdk-21.0.12.1+1/bin/java
+Arguments: '--inJar, /home/z/.gradle/caches/forge_gradle/minecraft_user_repo/net/minecraftforge/forge/1.21.4-54.1.18/forge-1.21.4-54.1.18-injected.jar, --outJar, /home/z/.gradle/caches/forge_gradle/minecraft_user_repo/net/minecraftforge/forge/1.21.4-54.1.18_mapped_official_1.21.4/forge-1.21.4-54.1.18_mapped_official_1.21.4.jar, --logFile, accesstransform.log, --atFile, /home/z/my-project/botsentinel/build/_atJar_4/parent_at.cfg'
+Classpath:
+ - /home/z/.gradle/caches/forge_gradle/maven_downloader/net/minecraftforge/accesstransformers/8.2.14/accesstransformers-8.2.14-fatjar.jar
+Working directory: /home/z/my-project/botsentinel/build/_atJar_4
+Main class: net.minecraftforge.accesstransformer.TransformerProcessor
+====================================

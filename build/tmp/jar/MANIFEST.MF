@@ -1,0 +1,7 @@
+Manifest-Version: 1.0
+Specification-Title: botsentinel
+Specification-Version: 2.2.0
+Implementation-Title: BotSentinel
+Implementation-Version: 2.2.0
+MixinConfigs: botsentinel.mixins.json
+
