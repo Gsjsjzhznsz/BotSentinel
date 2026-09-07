@@ -5,7 +5,7 @@ import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.fabricmc.fabric.api.message.api.v1.ServerMessageEvents;
+import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -57,11 +57,9 @@ public class BotSentinelMod implements DedicatedServerModInitializer {
             SentinelState.INSTANCE.onQuit(p.getGameProfile().getName(), ipOf(p));
         });
 
-        ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) -> {
-            ServerPlayerEntity p = sender.getPlayer();
-            return SentinelState.INSTANCE.onChat(
-                    p.getGameProfile().getName(), ipOf(p), message.getContent().getString());
-        });
+        ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) ->
+                SentinelState.INSTANCE.onChat(
+                        sender.getGameProfile().getName(), ipOf(sender), message.getContent().getString()));
 
         // 每秒检查自动保存(异步落盘在 timer 中做)
         ServerTickEvents.END_SERVER_TICK.register(s -> { /* 预留 */ });
@@ -104,10 +102,13 @@ public class BotSentinelMod implements DedicatedServerModInitializer {
     public static String ipOf(ServerPlayerEntity p) {
         try {
             if (p != null && p.networkHandler != null
-                    && p.networkHandler.getConnection() != null
-                    && p.networkHandler.getConnection().getAddress() instanceof InetSocketAddress isa
-                    && isa.getAddress() != null) {
-                return isa.getAddress().getHostAddress();
+                    && ((cn.botsentinel.mixin.ServerCommonNetworkHandlerAccessor) (Object) p.networkHandler)
+                            .botsentinel$getConnection() != null) {
+                var addr = ((cn.botsentinel.mixin.ServerCommonNetworkHandlerAccessor) (Object) p.networkHandler)
+                        .botsentinel$getConnection().getAddress();
+                if (addr instanceof InetSocketAddress isa && isa.getAddress() != null) {
+                    return isa.getAddress().getHostAddress();
+                }
             }
         } catch (Throwable ignored) {}
         return "";

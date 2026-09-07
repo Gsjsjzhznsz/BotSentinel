@@ -5,6 +5,7 @@ import cn.botsentinel.core.LibraryStore;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
@@ -28,7 +29,7 @@ public final class ModCommands {
         dispatcher.register(alias);
     }
 
-    private static void buildTree(CommandManager.literalArgumentBuilder<ServerCommandSource> root) {
+    private static void buildTree(LiteralArgumentBuilder<ServerCommandSource> root) {
         root.executes(ModCommands::help);
 
         root.then(CommandManager.literal("help").executes(ModCommands::help));
@@ -156,7 +157,7 @@ public final class ModCommands {
             ctx.getSource().sendFeedback(() -> Text.literal(msg(ctx, "检测到IP, 封IP请用 /botsentinel banip")), false);
             return 0;
         }
-        String ip = SentinelState.ipOfOnline(name);
+        String ip = SentinelState.ipOf(name);
         st.banHuman(name, ip, st.config.humanBanMinutes, reason);
         ctx.getSource().sendFeedback(() -> Text.literal(msg(ctx, "已封禁真人 §e" + name)), false);
         BotSentinelMod.kickOnline(name, st.config.humanBanMessage);

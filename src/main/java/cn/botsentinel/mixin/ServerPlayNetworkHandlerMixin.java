@@ -21,7 +21,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
     @Shadow
     public abstract ServerPlayerEntity getPlayer();
 
-    @Inject(method = "handleCommand(Lnet/minecraft/network/packet/c2s/play/CommandExecutionC2SPacket;)V",
+    @Inject(method = "onCommandExecution(Lnet/minecraft/network/packet/c2s/play/CommandExecutionC2SPacket;)V",
             at = @At("HEAD"), cancellable = true)
     private void botsentinel$onCommand(CommandExecutionC2SPacket packet, CallbackInfo ci) {
         ServerPlayerEntity player = this.getPlayer();

@@ -2,13 +2,14 @@ package cn.botsentinel.mixin;
 
 import cn.botsentinel.fabric.SentinelState;
 import com.mojang.authlib.GameProfile;
-import net.minecraft.network.SocketAddress;
 import net.minecraft.server.PlayerManager;
 import net.minecraft.text.Text;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+import java.net.SocketAddress;
 
 /**
  * 登录阶段拦截: checkCanJoin 是白名单/Ban 的判定点 —— 在 HEAD 注入,
