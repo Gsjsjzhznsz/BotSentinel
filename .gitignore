@@ -1,8 +1,7 @@
-# Maven
-target/
-*.jar
-!.github/**/*
-!docs/*.jar
+# Gradle
+build/
+.gradle/
+gradle-app.setting
 
 # IDE
 .idea/
@@ -11,12 +10,13 @@ target/
 .settings/
 .classpath
 .project
+bin/
 
 # Java
 *.class
-test_out/
 hs_err_pid*
 
 # OS
 .DS_Store
 Thumbs.db
+run/
