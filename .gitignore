@@ -1,0 +1,22 @@
+# Maven
+target/
+*.jar
+!.github/**/*
+!docs/*.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# Java
+*.class
+test_out/
+hs_err_pid*
+
+# OS
+.DS_Store
+Thumbs.db
