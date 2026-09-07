@@ -21,8 +21,10 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Setup Gradle
+      - name: Setup Gradle 8.14.3 (fabric-loom 1.9 requires <9)
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
 
       - name: Build
         run: gradle build --no-daemon
