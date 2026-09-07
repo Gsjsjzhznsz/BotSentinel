@@ -1,0 +1,53 @@
+plugins {
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'java'
+}
+
+group = 'cn.botsentinel'
+version = '2.2.0'
+base { archivesName = 'BotSentinel-2.2-forge' }
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+minecraft {
+    mappings channel: 'official', version: '1.21.4'
+    // 运行配置(可选): gradle runServer
+    runs {
+        server {
+            workingDirectory project.file('run')
+            mods { botsentinel { source sourceSets.main } }
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    // IP 归属地离线库(打进 jar)
+    implementation 'org.lionsoul:ip2region:2.7.0'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = 'UTF-8'
+    it.options.release = 21
+}
+
+jar {
+    manifest {
+        attributes([
+                'Specification-Title'     : 'botsentinel',
+                'Specification-Version'   : '2.2.0',
+                'Implementation-Title'    : 'BotSentinel',
+                'Implementation-Version'  : project.version,
+                // Forge 官方 mixin 支持: 声明配置文件
+                'MixinConfigs'            : 'botsentinel.mixins.json'
+        ])
+    }
+    from('LICENSE') {
+        rename { "${it}_${project.base.archivesName.get()}" }
+    }
+}

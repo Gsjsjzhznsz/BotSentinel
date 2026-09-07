@@ -1,11 +1,11 @@
-name: Build BotSentinel (Folia/Paper/Spigot)
+name: Build BotSentinel (Forge 1.21.4)
 
 on:
   push:
-    branches: [ main ]
+    branches: [ forge ]
     tags: [ 'v*' ]
   pull_request:
-    branches: [ main ]
+    branches: [ forge ]
   workflow_dispatch:
 
 jobs:
@@ -21,18 +21,21 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Build with Maven
-        run: mvn -B clean package
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Upload plugin jar
+      - name: Build
+        run: gradle build --no-daemon
+
+      - name: Upload mod jar
         uses: actions/upload-artifact@v4
         with:
-          name: BotSentinel-2.2
-          path: target/BotSentinel-*.jar
+          name: BotSentinel-2.2-forge
+          path: build/libs/*.jar
 
       - name: Release on tag
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: target/BotSentinel-*.jar
+          files: build/libs/*.jar
           generate_release_notes: true
