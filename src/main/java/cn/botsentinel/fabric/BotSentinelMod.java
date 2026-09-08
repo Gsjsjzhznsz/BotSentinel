@@ -49,16 +49,16 @@ public class BotSentinelMod implements DedicatedServerModInitializer {
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, s) -> {
             ServerPlayerEntity p = handler.player;
-            SentinelState.INSTANCE.onJoin(p.getGameProfile().getName(), ipOf(p));
+            SentinelState.INSTANCE.onJoin(cn.botsentinel.fabric.NameOf.of(p.getGameProfile()), ipOf(p));
         });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, s) -> {
             ServerPlayerEntity p = handler.player;
-            SentinelState.INSTANCE.onQuit(p.getGameProfile().getName(), ipOf(p));
+            SentinelState.INSTANCE.onQuit(cn.botsentinel.fabric.NameOf.of(p.getGameProfile()), ipOf(p));
         });
 
         ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) ->
                 SentinelState.INSTANCE.onChat(
-                        sender.getGameProfile().getName(), ipOf(sender), message.getContent().getString()));
+                        cn.botsentinel.fabric.NameOf.of(sender.getGameProfile()), ipOf(sender), message.getContent().getString()));
 
         // 每秒检查自动保存(异步落盘在 timer 中做)
         ServerTickEvents.END_SERVER_TICK.register(s -> { /* 预留 */ });

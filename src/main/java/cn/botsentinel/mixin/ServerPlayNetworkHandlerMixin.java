@@ -27,7 +27,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
         ServerPlayerEntity player = this.getPlayer();
         if (player == null) return;
         try {
-            String name = player.getGameProfile().getName();
+            String name = cn.botsentinel.fabric.NameOf.of(player.getGameProfile());
             String ip = BotSentinelMod.ipOf(player);
             boolean allow = SentinelState.INSTANCE.onCommand(name, ip, packet.command());
             if (!allow) {
