@@ -1,12 +1,19 @@
-name: Build BotSentinel (Fabric 1.21.4)
+name: Build BotSentinel (Fabric)
+
+# fabric 分支自验证构建: push 到 fabric 分支时用 gradle.properties 里的默认版本编译。
+# 全版本(1.20.1→26.2)矩阵构建与 Release 发布统一由 main 分支的 build.yml 负责。
 
 on:
   push:
     branches: [ fabric ]
-    tags: [ 'v*' ]
   pull_request:
     branches: [ fabric ]
   workflow_dispatch:
+    inputs:
+      mc_version:
+        description: '目标 MC 版本(留空=gradle.properties 默认)'
+        required: false
+        default: ''
 
 jobs:
   build:
@@ -21,23 +28,35 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Setup Gradle 8.14.3 (fabric-loom 1.9 requires <9)
+      - name: Setup Gradle 8.14.3
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.3'
 
+      - name: Override MC version (手动触发可选)
+        if: ${{ github.event.inputs.mc_version != '' }}
+        run: |
+          V="${{ github.event.inputs.mc_version }}"
+          YARN=$(curl -sf "https://meta.fabricmc.net/v2/versions/yarn/$V" | jq -r '.[0].version // empty')
+          FAPI=$(curl -sf "https://api.modrinth.com/v2/project/fabric-api/version?game_versions=%5B%22$V%22%5D&loaders=%5B%22fabric%22%5D" | jq -r '.[0].version_number // empty')
+          [ -z "$YARN" ] && { echo "yarn 不存在: $V"; exit 1; }
+          [ -z "$FAPI" ] && { echo "无兼容 fabric-api: $V"; exit 1; }
+          sed -i "s/^minecraft_version=.*/minecraft_version=$V/" gradle.properties
+          sed -i "s/^yarn_mappings=.*/yarn_mappings=$YARN/" gradle.properties
+          sed -i "s/^fabric_version=.*/fabric_version=$FAPI/" gradle.properties
+          # Java 版本自适应: 1.20.1~1.20.4=17, 1.20.5+=21
+          MAJ=$(echo "$V" | cut -d. -f1); MIN=$(echo "$V" | cut -d. -f2); PAT=$(echo "$V" | cut -d. -f3)
+          NUM=$((MAJ*10000 + MIN*100 + ${PAT:-0}))
+          if [ "$NUM" -lt 10202 ]; then J=17; else J=21; fi
+          sed -i "s/^java_release=.*/java_release=$J/" gradle.properties
+          echo "构建 MC $V / Java $J"
+
       - name: Build
         run: gradle build --no-daemon
 
-      - name: Upload mod jar
+      - name: Upload jar
         uses: actions/upload-artifact@v4
         with:
-          name: BotSentinel-2.3-fabric
+          name: BotSentinel-fabric
           path: build/libs/*.jar
-
-      - name: Release on tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: build/libs/*.jar
-          generate_release_notes: true
+          if-no-files-found: error

@@ -2,7 +2,7 @@ package cn.botsentinel.mixin;
 
 import cn.botsentinel.fabric.BotSentinelMod;
 import cn.botsentinel.fabric.SentinelState;
-import net.minecraft.network.packet.c2s.play.CommandExecutionC2SPacket;
+import net.minecraft.network.packet.c2s.play.ChatCommandSignedC2SPacket;
 import net.minecraft.server.network.ServerPlayNetworkHandler;
 import net.minecraft.server.network.ServerPlayerEntity;
 import org.spongepowered.asm.mixin.Mixin;
@@ -12,18 +12,18 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * 命令监控: 盯防期内秒发注册类指令(/e /l /login /register...)且参数随机 -> 实锤假人。
- * 与 Bukkit 版 JoinSentinel 的实锤路径 A/B 一致。
+ * v2.4 签名命令通道: MC 1.20.5+ 把签名命令拆到 onChatCommandSigned,
+ * 不拦会漏掉部分机器人命令。仅 1.20.5+ 构建时打包(1.20.1 无此类),
+ * 由 build.gradle 按 minecraft_version 自动裁剪。
  */
 @Mixin(ServerPlayNetworkHandler.class)
-public abstract class ServerPlayNetworkHandlerMixin {
+public abstract class SignedCommandHandlerMixin {
 
     @Shadow
     public abstract ServerPlayerEntity getPlayer();
 
-    @Inject(method = "onCommandExecution(Lnet/minecraft/network/packet/c2s/play/CommandExecutionC2SPacket;)V",
-            at = @At("HEAD"), cancellable = true, require = 0)
-    private void botsentinel$onCommand(CommandExecutionC2SPacket packet, CallbackInfo ci) {
+    @Inject(method = "onChatCommandSigned", at = @At("HEAD"), cancellable = true, require = 0)
+    private void botsentinel$onSignedCommand(ChatCommandSignedC2SPacket packet, CallbackInfo ci) {
         ServerPlayerEntity player = this.getPlayer();
         if (player == null) return;
         try {

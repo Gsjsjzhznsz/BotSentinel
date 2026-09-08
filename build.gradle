@@ -1,11 +1,27 @@
 plugins {
-    id 'fabric-loom' version '1.9-SNAPSHOT'
+    id 'fabric-loom' version "${loom_version}"
     id 'java'
 }
 
 group = 'cn.botsentinel'
-version = '2.3.0'
-base { archivesName = 'BotSentinel-${project.version}-fabric' }
+version = project.mod_version
+// v2.4 修复: 原来单引号不插值导致 jar 名含 ${}; 最终名 = BotSentinel-<mod_version>-fabric-mc<mc>.jar
+base { archivesName = "BotSentinel-fabric-mc${project.minecraft_version}" }
+
+
+// ===== v2.4 跨版本自适应: 按 minecraft_version 裁剪源码 =====
+// MC 1.20.5 才引入签名命令包(ChatCommandSignedC2SPacket), 1.20.1 无此类,
+// 同一份源码要在 1.20.1~26.x 全部编译通过, 必须按版本裁剪。
+def _m = (project.minecraft_version =~ /^(\d+)\.(\d+)(?:\.(\d+))?/)
+if (!_m.find()) throw new GradleException("无法解析 minecraft_version: " + project.minecraft_version)
+def mcComparable = (_m.group(1) as int) * 10000 + (_m.group(2) as int) * 100 + (_m.group(3) ? (_m.group(3) as int) : 0)
+def signedSupported = mcComparable >= 1 * 10000 + 20 * 100 + 5   // >= 1.20.5
+if (!signedSupported) {
+    sourceSets.main.java { exclude '**/SignedCommandHandlerMixin.java' }
+    logger.lifecycle("BotSentinel: MC {} < 1.20.5 -> 排除签名命令 mixin", project.minecraft_version)
+} else {
+    logger.lifecycle("BotSentinel: MC {} >= 1.20.5 -> 包含签名命令 mixin", project.minecraft_version)
+}
 
 repositories {
     mavenCentral()
@@ -21,20 +37,32 @@ dependencies {
     include implementation("org.lionsoul:ip2region:2.7.0")
 }
 
+// v2.4: Java 版本由 gradle.properties 注入 (1.20.1~1.20.4=17, 1.20.5+=21, 26.x=25)
+int JR = (project.hasProperty('java_release') ? project.property('java_release') : '21') as int
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+    sourceCompatibility = JavaVersion.toVersion(JR)
+    targetCompatibility = JavaVersion.toVersion(JR)
 }
 
 tasks.withType(JavaCompile).configureEach {
     it.options.encoding = 'UTF-8'
-    it.options.release = 21
+    it.options.release = JR
 }
 
 processResources {
     inputs.property 'version', project.version
+    // v2.4: 版本标志作为任务输入 —— 换 MC 版本构建时强制重跑
+    inputs.property 'signedSupported', signedSupported
     filesMatching('fabric.mod.json') {
         expand 'version': project.version
+    }
+    // v2.4: 源 mixins.json 只含全版本安全的条目; 仅 1.20.5+ 构建时追加签名命令条目。
+    // (不做"剔除"方向: loom 的 Gson 重写循环对过滤产物处理不可控, 1.20.1 必须零改动)
+    if (signedSupported) {
+        filesMatching('botsentinel.mixins.json') {
+            filter { line -> line.replace('"ServerPlayNetworkHandlerMixin"',
+                    '"ServerPlayNetworkHandlerMixin",\n    "SignedCommandHandlerMixin"') }
+        }
     }
 }
 

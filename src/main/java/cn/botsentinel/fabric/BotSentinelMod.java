@@ -17,7 +17,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * BotSentinel v2.2 — Fabric 1.21.4 服务端 mod 入口。
+ * BotSentinel v2.4 — Fabric 服务端 mod 入口 (跨版本: MC 1.20.1~26.x, Java 17~25)。
  *
  * 进服前拦截通过 PlayerManagerMixin(checkCanJoin) 实现 —— 在登录阶段拒绝,
  * 不产生任何 join/quit 消息, QQ 桥零感知。
@@ -100,18 +100,9 @@ public class BotSentinelMod implements DedicatedServerModInitializer {
     // ---------- 工具: 由 SentinelState / ModCommands 调用 ----------
 
     public static String ipOf(ServerPlayerEntity p) {
-        try {
-            if (p != null && p.networkHandler != null
-                    && ((cn.botsentinel.mixin.ServerCommonNetworkHandlerAccessor) (Object) p.networkHandler)
-                            .botsentinel$getConnection() != null) {
-                var addr = ((cn.botsentinel.mixin.ServerCommonNetworkHandlerAccessor) (Object) p.networkHandler)
-                        .botsentinel$getConnection().getAddress();
-                if (addr instanceof InetSocketAddress isa && isa.getAddress() != null) {
-                    return isa.getAddress().getHostAddress();
-                }
-            }
-        } catch (Throwable ignored) {}
-        return "";
+        if (p == null) return "";
+        // v2.4: 反射按类型取连接(跨版本无映射依赖, 兼容 1.20.1~26.x)
+        return ConnectionIps.remoteIp(p.networkHandler);
     }
 
     public static String ipOfOnline(String name) {

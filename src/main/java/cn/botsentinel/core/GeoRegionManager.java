@@ -29,11 +29,22 @@ import org.lionsoul.ip2region.xdb.Searcher;
  */
 public class GeoRegionManager {
 
+    /**
+     * v2.4 镜像池: 国内可达代理优先, 官方源收尾。
+     * v2.3 实测教训: 国内服务器 raw/jsDelivr 下载其实能成功, 真正炸掉的是
+     * 首次下载时 plugins/BotSentinel/geo/ 目录不存在 -> NoSuchFileException。
+     * v2.4 已在写入前 createDirectories, 镜像池扩充为多层防御。
+     */
     public static final String[] DEFAULT_MIRRORS = {
-            "https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb",
+            "https://ghproxy.net/https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb",
+            "https://gh-proxy.com/https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb",
+            "https://ghfast.top/https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb",
+            "https://github.moeyy.xyz/https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb",
             "https://cdn.jsdelivr.net/gh/lionsoul2014/ip2region@master/data/ip2region_v4.xdb",
-            "https://gitee.com/lionsoul/ip2region/raw/master/data/ip2region_v4.xdb",
-            "https://ghproxy.net/https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb"
+            "https://fastly.jsdelivr.net/gh/lionsoul2014/ip2region@master/data/ip2region_v4.xdb",
+            "https://testingcf.jsdelivr.net/gh/lionsoul2014/ip2region@master/data/ip2region_v4.xdb",
+            "https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb",
+            "https://gitee.com/lionsoul/ip2region/raw/master/data/ip2region_v4.xdb"
     };
 
     /** 判定结果 */
@@ -136,12 +147,22 @@ public class GeoRegionManager {
     private void downloadAndLoadAsync(String why) {
         lastDownloadAttempt = System.currentTimeMillis();
         state = State.DOWNLOADING;
-        infoLog.accept("[地区库] " + why + " 开始下载 ip2region.xdb (约11MB, 多镜像自动切换) ...");
+        infoLog.accept("[地区库] " + why + " 开始下载 ip2region_v4.xdb (约7MB, 多镜像自动切换) ...");
         Thread t = new Thread(() -> {
             Path tmp = dbFile.resolveSibling("ip2region.xdb.downloading");
+            // v2.4 关键修复: 首次下载时 geo/ 目录可能还不存在, 不创建则所有镜像都会 NoSuchFileException
+            try {
+                if (dbFile.getParent() != null) Files.createDirectories(dbFile.getParent());
+            } catch (Exception e) {
+                state = State.FAILED;
+                lastError = "无法创建目录 " + dbFile.getParent() + " : " + e.getMessage();
+                warnLog.accept("[地区库] " + lastError);
+                return;
+            }
+            StringBuilder tried = new StringBuilder();
             for (String mirror : DEFAULT_MIRRORS) {
                 try {
-                    byte[] data = httpGet(mirror, 30_000, 90_000);
+                    byte[] data = httpGet(mirror, 15_000, 120_000);
                     if (data == null || data.length < 1_000_000) throw new IOException("文件过小(" + (data == null ? 0 : data.length) + "B)");
                     Files.write(tmp, data);
                     validateFile(tmp);
@@ -154,16 +175,30 @@ public class GeoRegionManager {
                     infoLog.accept("[地区库] 下载并加载成功: " + (dbSize() / 1024 / 1024) + "MB, 来源: " + mirror);
                     return;
                 } catch (Exception e) {
-                    lastError = mirror + " : " + e.getMessage();
+                    lastError = mirror + " -> " + describe(e);
+                    tried.append("\n  - ").append(lastError);
                     warnLog.accept("[地区库] 镜像失败 " + lastError);
                 }
             }
             try { Files.deleteIfExists(tmp); } catch (Exception ignored) {}
             state = State.FAILED;
-            warnLog.accept("[地区库] 全部镜像下载失败(" + lastError + "), 10分钟后自动重试; /atb geo download 可手动重试");
+            warnLog.accept("[地区库] 全部 " + DEFAULT_MIRRORS.length + " 个镜像下载失败, 10分钟后自动重试; /atb geo download 可手动重试。"
+                    + "若你的网络全部不可达, 可手动下载 ip2region_v4.xdb 放到 " + dbFile + " 后重载。明细:" + tried);
         }, "BotSentinel-GeoDownload");
         t.setDaemon(true);
         t.start();
+    }
+
+    /** v2.4: 异常分类描述, 不再出现"只打印一个文件路径"的黑箱 */
+    private static String describe(Throwable e) {
+        if (e == null) return "未知错误";
+        String m = e.getMessage();
+        if (e instanceof java.net.SocketTimeoutException) return "连接/读取超时";
+        if (e instanceof java.net.ConnectException) return "连接失败(可能被墙): " + (m == null ? "" : m);
+        if (e instanceof java.nio.file.NoSuchFileException) return "本地路径不存在: " + m;
+        if (e instanceof java.net.UnknownHostException) return "域名解析失败: " + (m == null ? "" : m);
+        if (e instanceof javax.net.ssl.SSLException) return "SSL错误: " + (m == null ? "" : m);
+        return e.getClass().getSimpleName() + ": " + (m == null ? "" : m);
     }
 
     private void validateFile(Path p) throws Exception {
@@ -266,14 +301,24 @@ public class GeoRegionManager {
         conn.setConnectTimeout(connTimeout);
         conn.setReadTimeout(readTimeout);
         conn.setInstanceFollowRedirects(true);
-        conn.setRequestProperty("User-Agent", "BotSentinel/2.2 (minecraft-plugin)");
-        int code = conn.getResponseCode();
-        if (code != 200) throw new IOException("HTTP " + code);
-        try (var in = conn.getInputStream(); var out = new java.io.ByteArrayOutputStream()) {
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-            return out.toByteArray();
+        // v2.4: 浏览器样式 UA + Referer, 避免 gitee 等站点反爬 403
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 BotSentinel/2.4");
+        conn.setRequestProperty("Accept", "*/*");
+        try {
+            int code = conn.getResponseCode();
+            if (code != 200) throw new IOException("HTTP " + code + (code == 403 ? "(反爬拒绝)" : code == 404 ? "(文件不存在)" : ""));
+            long total = conn.getContentLengthLong();
+            try (var in = conn.getInputStream(); var out = new java.io.ByteArrayOutputStream()) {
+                byte[] buf = new byte[65536];
+                int n; long got = 0;
+                while ((n = in.read(buf)) > 0) { out.write(buf, 0, n); got += n; }
+                if (total > 0 && got != total) throw new IOException("下载不完整(" + got + "/" + total + "B)");
+                return out.toByteArray();
+            }
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException(describe(e));
         } finally {
             conn.disconnect();
         }

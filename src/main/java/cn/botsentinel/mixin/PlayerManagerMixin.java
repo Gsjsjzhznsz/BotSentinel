@@ -18,7 +18,8 @@ import java.net.SocketAddress;
 @Mixin(PlayerManager.class)
 public abstract class PlayerManagerMixin {
 
-    @Inject(method = "checkCanJoin", at = @At("HEAD"), cancellable = true)
+    // require=0: 未来版本(26.x+)签名漂移时软降级(仅失去进服前拦截, 不崩服)
+    @Inject(method = "checkCanJoin", at = @At("HEAD"), cancellable = true, require = 0)
     private void botsentinel$preLogin(SocketAddress address, GameProfile profile,
                                       CallbackInfoReturnable<Text> cir) {
         if (profile == null || profile.getName() == null) return;
