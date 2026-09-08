@@ -79,7 +79,7 @@ jobs:
             n=$((n+1))
           done
           entries="${entries%,}"
-          echo "matrix={\"include\":[${entries}]}" > matrix.json
+          echo "{\"include\":[${entries}]}" > matrix.json   # 注意: 文件内容必须是纯JSON, 前缀只能在 GITHUB_OUTPUT 行加
           cat matrix.json
           echo "matrix=$(cat matrix.json)" >> $GITHUB_OUTPUT
           echo "共解析出 $n 个 Fabric 构建目标"
@@ -106,7 +106,7 @@ jobs:
             n=$((n+1))
           done
           entries="${entries%,}"
-          echo "matrix={\"include\":[${entries}]}" > matrix.json
+          echo "{\"include\":[${entries}]}" > matrix.json   # 注意: 文件内容必须是纯JSON, 前缀只能在 GITHUB_OUTPUT 行加
           cat matrix.json
           echo "matrix=$(cat matrix.json)" >> $GITHUB_OUTPUT
           echo "共解析出 $n 个 Forge 构建目标"
