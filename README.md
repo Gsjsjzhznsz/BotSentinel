@@ -37,6 +37,9 @@ BotSentinel 是为 **Folia 系内核（Lophine / Luminol / Folia）** 与传统 
 | 🔄 配置自动迁移 (v2.3) | config-version 机制：v2.0~v2.2 旧配置升级自动备份、保留你的全部设置、自动补新键带注释 —— 以后更新永不再手改配置 |
 | 🧩 登录命令自适应 (v2.3) | 不绑定特定登录插件：盯防期内任意命令+随机参数即可作为信号，实锤 bot 的命令自动学进本服命令库 —— AuthMe/CatSeedLogin/模组登录环境通吃 |
 | 🚀 波次快速封禁 (v2.3) | 同 IP 被拦机器人达 N 次立即封 IP（默认 3，比新账号计数更快掐断刷波） |
+| 📦 模组端全版本 jar (v2.4) | Fabric/Forge **每个 MC 版本一个专用 jar**（1.20.1 → 26.2，共 30+ 个），CI 自适应构建：按版本自动选 Java 17/21/25、实时解析 yarn/fabric-api/Forge 构建号 |
+| 🧬 跨版本零映射依赖 (v2.4) | mod 端反射按类型取网络连接（不依赖 yarn/mojmap 字段名）、按版本条件编译（1.20.1 无签名命令包自动裁剪、Forge 1.20.1 自动 SRG 重映射+refmap） |
+| 🔧 归属地库下载修复 (v2.4) | v2.3 实测发现首次下载时 geo 目录不存在导致全部镜像"下载成功但写入失败" → 已修复；镜像池扩到 9 个（ghproxy 系国内直连优先），错误分类一目了然（被墙/超时/403 反爬） |
 
 ## 环境要求
 
@@ -52,10 +55,31 @@ BotSentinel 是为 **Folia 系内核（Lophine / Luminol / Folia）** 与传统 
 
 ## 快速开始
 
-1. 把 `BotSentinel-2.3.jar` 放进 `plugins/`，重启服务器（旧配置自动迁移；归属地库后台自动下载）
+1. 把 `BotSentinel-2.4.jar` 放进 `plugins/`，重启服务器（旧配置自动迁移；归属地库后台自动下载）
 2. 特征库会从 `usercache.json` 自动播种已登记真人（过滤随机名），老玩家零感知
 3. 需要地区拦截时执行 `/atb geo on` —— 本地库已就绪，立即生效
 4. `/atb engine <玩家名>` 可查看 AI 评分引擎对该名字的四策略明细
+
+## 多平台下载（Release 资产说明）
+
+| 你在用什么服务器 | 下载 Release 里的哪个文件 |
+|---|---|
+| Folia / Lophine / Luminol / Paper / Purpur / Spigot | `BotSentinel-2.4.jar`（一个 jar 通吃 1.20~26.2） |
+| Fabric 服务端 (MC 1.20.1 ~ 1.21.11) | `BotSentinel-fabric-mc<你的MC版本>-2.4.0.jar`（需同时装 Fabric API） |
+| Forge 服务端 (MC 1.20.1 ~ 1.21.x) | `BotSentinel-forge-mc<你的MC版本>-2.4.0.jar`（服务端专用） |
+| 26.x 模组端 | 版本发布后同一工作流自动覆盖（yarn/Forge 构建号已发布即出 jar） |
+
+> 模组端与插件端风控内核同源（`cn.botsentinel.core`），特征库/评分引擎/归属地拦截行为一致。
+
+## CI 自适应构建（维护者向）
+
+`.github/workflows/build.yml` 一个文件搞定全部平台全版本：
+
+- **版本清单**：环境变量 `MC_VERSIONS_DEFAULT` 一行维护（当前 1.20.1 → 26.2）
+- **Java 自适应**：1.20.1~1.20.4 → Java 17；1.20.5~1.21.x → Java 21；26.x → Java 25
+- **依赖实时解析**：yarn/loader 从 `meta.fabricmc.net`、fabric-api 从 Modrinth、Forge 构建号从 `promotions_slim.json` —— 永不过期、无需改 workflow
+- **优雅降级**：某版本依赖不存在（如 26.x 的 yarn 尚未发布）→ 跳过并在日志标注，不影响其他版本
+- **发布**：推 tag `v*` → 全矩阵构建 → Release 自动排版（插件端 + Fabric 表格 + Forge 表格 + 安装说明）
 
 ## 命令一览（权限 `botsentinel.admin`，默认 OP）
 
