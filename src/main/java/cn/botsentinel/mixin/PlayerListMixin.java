@@ -24,11 +24,11 @@ public abstract class PlayerListMixin {
     @Inject(method = "canPlayerLogin", at = @At("HEAD"), cancellable = true, require = 0)
     private void botsentinel$preLogin(ServerLoginPacketListenerImpl handler, GameProfile profile,
                                       CallbackInfoReturnable<Component> cir) {
-        if (profile == null || profile.getName() == null) return;
+        if (profile == null || cn.botsentinel.forge.NameOf.of(profile) == null) return;
         // v2.4: 反射按类型取连接(跨版本无映射依赖, 兼容 1.20.1~26.x)
         String ip = cn.botsentinel.forge.ConnectionIps.remoteIp(handler);
 
-        String deny = SentinelState.INSTANCE.preLoginDecision(profile.getName(), ip);
+        String deny = SentinelState.INSTANCE.preLoginDecision(cn.botsentinel.forge.NameOf.of(profile), ip);
         if (deny != null) {
             cir.setReturnValue(Component.literal(deny));
         }

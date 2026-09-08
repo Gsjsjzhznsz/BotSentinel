@@ -24,7 +24,7 @@ public abstract class PlayerListLegacyMixin {
     @Inject(method = "canPlayerLogin", at = @At("HEAD"), cancellable = true, require = 0)
     private void botsentinel$preLogin(SocketAddress address, GameProfile profile,
                                       CallbackInfoReturnable<Component> cir) {
-        if (profile == null || profile.getName() == null) return;
+        if (profile == null || cn.botsentinel.forge.NameOf.of(profile) == null) return;
         String ip = "";
         try {
             if (address instanceof InetSocketAddress isa && isa.getAddress() != null) {
@@ -33,7 +33,7 @@ public abstract class PlayerListLegacyMixin {
         } catch (Throwable ignored) {
         }
 
-        String deny = SentinelState.INSTANCE.preLoginDecision(profile.getName(), ip);
+        String deny = SentinelState.INSTANCE.preLoginDecision(cn.botsentinel.forge.NameOf.of(profile), ip);
         if (deny != null) {
             cir.setReturnValue(Component.literal(deny));
         }

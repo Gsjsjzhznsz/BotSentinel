@@ -45,13 +45,13 @@ class SentinelEvents {
     @SubscribeEvent
     public void onLoggedIn(PlayerEvent.PlayerLoggedInEvent e) {
         if (!(e.getEntity() instanceof ServerPlayer p)) return;
-        SentinelState.INSTANCE.onJoin(p.getGameProfile().getName(), p.getIpAddress());
+        SentinelState.INSTANCE.onJoin(cn.botsentinel.forge.NameOf.of(p.getGameProfile()), cn.botsentinel.forge.ConnectionIps.remoteIp(p.connection));
     }
 
     @SubscribeEvent
     public void onLoggedOut(PlayerEvent.PlayerLoggedOutEvent e) {
         if (!(e.getEntity() instanceof ServerPlayer p)) return;
-        SentinelState.INSTANCE.onQuit(p.getGameProfile().getName(), p.getIpAddress());
+        SentinelState.INSTANCE.onQuit(cn.botsentinel.forge.NameOf.of(p.getGameProfile()), cn.botsentinel.forge.ConnectionIps.remoteIp(p.connection));
     }
 
     // ---------- 聊天守卫 ----------
@@ -60,9 +60,9 @@ class SentinelEvents {
     public boolean onChat(ServerChatEvent e) {
         ServerPlayer p = e.getPlayer();
         boolean allow = SentinelState.INSTANCE.onChat(
-                p.getGameProfile().getName(), p.getIpAddress(), e.getRawText());
+                cn.botsentinel.forge.NameOf.of(p.getGameProfile()), cn.botsentinel.forge.ConnectionIps.remoteIp(p.connection), e.getRawText());
         if (!allow) {
-            if (SentinelState.INSTANCE.sessionScore(p.getGameProfile().getName()) == -100) {
+            if (SentinelState.INSTANCE.sessionScore(cn.botsentinel.forge.NameOf.of(p.getGameProfile())) == -100) {
                 p.connection.disconnect(Component.literal(SentinelState.INSTANCE.config.disposeMessage));
             }
             return true;

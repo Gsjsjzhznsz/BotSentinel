@@ -30,8 +30,8 @@ public abstract class ServerGamePacketListenerMixin {
     private boolean botsentinel$check(String command) {
         if (player == null) return false;
         try {
-            String name = player.getGameProfile().getName();
-            String ip = player.getIpAddress();
+            String name = cn.botsentinel.forge.NameOf.of(player.getGameProfile());
+            String ip = cn.botsentinel.forge.ConnectionIps.remoteIp(player.connection);
             boolean allow = SentinelState.INSTANCE.onCommand(name, ip, command);
             if (!allow) {
                 player.connection.disconnect(Component.literal(SentinelState.INSTANCE.config.disposeMessage));

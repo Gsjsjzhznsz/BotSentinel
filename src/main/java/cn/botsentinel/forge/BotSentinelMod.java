@@ -42,7 +42,7 @@ public class BotSentinelMod {
         MinecraftServer s = server;
         if (s == null) return "";
         ServerPlayer p = s.getPlayerList().getPlayerByName(name);
-        return p == null ? "" : p.getIpAddress();
+        return p == null ? "" : cn.botsentinel.forge.ConnectionIps.remoteIp(p.connection);
     }
 
     public static void kickOnline(String name, String message) {
