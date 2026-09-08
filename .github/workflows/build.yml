@@ -1,11 +1,27 @@
 name: Build & Release All Platforms
 
-# 一个工作流构建全部平台:
-#   [插件]  main 分支 Maven  ->  BotSentinel-x.y.jar  (Folia/Paper/Spigot/Purpur, MC 1.20-26.2, Java 17-25)
-#   [Fabric] fabric 分支 Gradle -> BotSentinel-fabric.jar (Fabric 服务器 mod)
-#   [Forge]  forge 分支 Gradle -> BotSentinel-forge.jar  (Forge 服务器 mod)
-# 推 tag (v*) 时自动创建 GitHub Release: 三个平台 jar 按排版好的说明一起发布。
-# 手动触发(workflow_dispatch)可指定 mod 端 MC 版本(留空用分支默认 1.21.4)。
+# =====================================================================
+# BotSentinel v2.4 全平台全版本 自适应构建 + Release 自动排版发布
+#
+# 一个工作流文件产出:
+#   [插件]  BotSentinel-2.4.jar                  (Folia/Paper/Spigot/Purpur, MC 1.20~26.2, Java 17~25)
+#   [Fabric] BotSentinel-fabric-mc<版本>.jar     (MC 1.20.1 → 26.2 每个版本一个 jar)
+#   [Forge]  BotSentinel-forge-mc<版本>.jar      (MC 1.20.1 → 26.2 每个版本一个 jar)
+#
+# 自适应机制:
+#   1. Java 版本按 MC 版本自动选择 (1.20.1~1.20.4=17, 1.20.5~1.21.x=21, 26.x=25)
+#   2. yarn/fabric-api/loader 版本从 meta.fabricmc.net + Modrinth 实时解析(不硬编码, 永不过期)
+#   3. forge 构建号从 promotions_slim.json 实时解析
+#   4. 某版本解析不到依赖或编译失败 → 跳过并在汇总表标注, 不影响其他版本
+#   5. mod 端源码按版本条件编译(1.20.1 无签名命令包/无 ServerCommon 类, 自动裁剪)
+#
+# 触发:
+#   - push tag v*    → 构建 + 自动创建 GitHub Release(三平台 jar + 排版正文)
+#   - push main / PR → 仅构建验证
+#   - 手动 workflow_dispatch → 可选输入自定义 MC 版本列表(逗号分隔)
+#
+# 以后维护: 支持新 MC 版本时只需在下方 MC_VERSIONS 加一个版本号。
+# =====================================================================
 
 on:
   push:
@@ -15,166 +31,262 @@ on:
     branches: [ main ]
   workflow_dispatch:
     inputs:
-      mod_mc_version:
-        description: 'Fabric/Forge 目标 MC 版本(留空=分支默认 1.21.4, 如 1.20.1)'
+      mc_versions:
+        description: 'Fabric/Forge 目标 MC 版本列表(逗号分隔, 留空=内置全列表 1.20.1→26.2)'
         required: false
         default: ''
 
+env:
+  # ===== 全版本清单: 在此追加新版本即可(空格分隔) =====
+  MC_VERSIONS_DEFAULT: "1.20.1 1.20.2 1.20.3 1.20.4 1.20.5 1.20.6 1.21 1.21.1 1.21.2 1.21.3 1.21.4 1.21.5 1.21.6 1.21.7 1.21.8 1.21.9 1.21.10 1.21.11 26.1 26.2"
+  GRADLE_FOR_OLD: "8.14.3"   # Fabric loom 1.9 / Forge FG6 用
+  GRADLE_FOR_NEW: "9.1.0"    # 26.x (Java 25) 用
+
 jobs:
+  # ================= 解析矩阵: 每个 MC 版本 → Java/依赖版本 =================
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      fabric-matrix: ${{ steps.fabric.outputs.matrix }}
+      forge-matrix: ${{ steps.forge.outputs.matrix }}
+    steps:
+      - name: Resolve Fabric matrix
+        id: fabric
+        run: |
+          VERS="${{ github.event.inputs.mc_versions }}"
+          [ -z "$VERS" ] && VERS="$MC_VERSIONS_DEFAULT"
+          VERS="${VERS//,/ }"
+          entries=""
+          n=0
+          for mc in $VERS; do
+            # ---- Java 映射: 1.20.1~1.20.4=17, 1.20.5~1.21.x=21, 26.x=25 ----
+            maj=$(echo "$mc" | cut -d. -f1); min=$(echo "$mc" | cut -d. -f2); pat=$(echo "$mc" | cut -d. -f3)
+            num=$((maj*10000 + min*100 + ${pat:-0}))
+            if   [ "$num" -lt 10202 ]; then java=17; loom="1.9.2";          gradle="$GRADLE_FOR_OLD"
+            elif [ "$num" -lt 26000 ]; then java=21; loom="1.9.2";          gradle="$GRADLE_FOR_OLD"
+            else                           java=25; loom="1.11-SNAPSHOT";   gradle="$GRADLE_FOR_NEW"
+            fi
+            # ---- yarn 映射实时解析(版本不存在则跳过) ----
+            yarn=$(curl -sf --retry 3 "https://meta.fabricmc.net/v2/versions/yarn/$mc" | jq -r '.[0].version // empty')
+            if [ -z "$yarn" ]; then echo "SKIP fabric $mc: yarn 映射不存在"; echo "SKIP_FABRIC $mc (yarn 不存在)" >> skip.log; continue; fi
+            # ---- fabric-api 兼容版实时解析 ----
+            fapi=$(curl -sf --retry 3 "https://api.modrinth.com/v2/project/fabric-api/version?game_versions=%5B%22$mc%22%5D&loaders=%5B%22fabric%22%5D" | jq -r '.[0].version_number // empty')
+            if [ -z "$fapi" ]; then echo "SKIP fabric $mc: 无兼容 fabric-api"; echo "SKIP_FABRIC $mc (无 fabric-api)" >> skip.log; continue; fi
+            # ---- loader 最新稳定版 ----
+            loader=$(curl -sf --retry 3 "https://meta.fabricmc.net/v2/versions/loader" | jq -r '[.[] | select(.stable)][0].version')
+            entries="$entries{\"mc\":\"$mc\",\"java\":$java,\"gradle\":\"$gradle\",\"loom\":\"$loom\",\"yarn\":\"$yarn\",\"fapi\":\"$fapi\",\"loader\":\"$loader\"},"
+            n=$((n+1))
+          done
+          entries="${entries%,}"
+          echo "matrix={\"include\":[${entries}]}" > matrix.json
+          cat matrix.json
+          echo "matrix=$(cat matrix.json)" >> $GITHUB_OUTPUT
+          echo "共解析出 $n 个 Fabric 构建目标"
+
+      - name: Resolve Forge matrix
+        id: forge
+        run: |
+          curl -sfL --retry 3 "https://files.minecraftforge.net/maven/net/minecraftforge/forge/promotions_slim.json" -o promo.json
+          VERS="${{ github.event.inputs.mc_versions }}"
+          [ -z "$VERS" ] && VERS="$MC_VERSIONS_DEFAULT"
+          VERS="${VERS//,/ }"
+          entries=""
+          n=0
+          for mc in $VERS; do
+            maj=$(echo "$mc" | cut -d. -f1); min=$(echo "$mc" | cut -d. -f2); pat=$(echo "$mc" | cut -d. -f3)
+            num=$((maj*10000 + min*100 + ${pat:-0}))
+            if   [ "$num" -lt 10202 ]; then java=17; gradle="8.10.2"; fg="[6.0,6.2)"
+            elif [ "$num" -lt 26000 ]; then java=21; gradle="8.10.2"; fg="[6.0,6.2)"
+            else                           java=25; gradle="$GRADLE_FOR_NEW"; fg="[6.0,6.2)"
+            fi
+            forge=$(jq -r ".promos[\"$mc-latest\"] // empty" promo.json)
+            if [ -z "$forge" ]; then echo "SKIP forge $mc: 官方无该版本构建"; echo "SKIP_FORGE $mc (无 Forge 构建)" >> skip.log; continue; fi
+            entries="$entries{\"mc\":\"$mc\",\"java\":$java,\"gradle\":\"$gradle\",\"forge\":\"$forge\",\"fg\":\"$fg\"},"
+            n=$((n+1))
+          done
+          entries="${entries%,}"
+          echo "matrix={\"include\":[${entries}]}" > matrix.json
+          cat matrix.json
+          echo "matrix=$(cat matrix.json)" >> $GITHUB_OUTPUT
+          echo "共解析出 $n 个 Forge 构建目标"
+
+  # ================= 插件端 (Folia/Paper/Spigot) =================
   build-plugin:
-    name: Plugin (Folia/Paper/Spigot 1.20-26.2)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout main
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 21 (产出 Java 17 字节码, 兼容 Java 17-25)
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21 (产出 Java 17 字节码, 运行于 Java 17~25)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-
       - name: Build with Maven
         run: mvn -B clean package
-
-      - name: Upload plugin jar
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BotSentinel-plugin
+          name: plugin
           path: target/BotSentinel-*.jar
           if-no-files-found: error
 
+  # ================= Fabric 模组端 (每版本一个 jar) =================
   build-fabric:
-    name: Mod (Fabric ${{ github.event.inputs.mod_mc_version || '1.21.4' }})
+    needs: resolve
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.resolve.outputs.fabric-matrix) }}
+    continue-on-error: true   # 单版本失败不拖垮整体, Release 汇总表会标注
     steps:
       - name: Checkout fabric branch
         uses: actions/checkout@v4
         with:
           ref: fabric
           path: fabric
-
-      - name: Set up JDK 21
+      - name: Set up JDK ${{ matrix.java }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
-
-      - name: Setup Gradle 8.14.3 (fabric-loom 1.9 requires <9)
+          java-version: ${{ matrix.java }}
+      - name: Setup Gradle ${{ matrix.gradle }}
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.14.3'
-
-      - name: Override MC version (manual input)
-        if: ${{ github.event.inputs.mod_mc_version != '' }}
+          gradle-version: ${{ matrix.gradle }}
+      - name: 注入版本参数 (MC ${{ matrix.mc }} / Java ${{ matrix.java }})
         working-directory: fabric
         run: |
-          V="${{ github.event.inputs.mod_mc_version }}"
-          sed -i "s/^minecraft_version=.*/minecraft_version=$V/" gradle.properties
-          echo "已切换 MC 版本: $V (注意 yarn_mappings/fabric_version 也需匹配该版本, 否则构建失败)"
-
-      - name: Build Fabric mod
+          sed -i "s/^minecraft_version=.*/minecraft_version=${{ matrix.mc }}/" gradle.properties
+          sed -i "s/^yarn_mappings=.*/yarn_mappings=${{ matrix.yarn }}/" gradle.properties
+          sed -i "s/^fabric_version=.*/fabric_version=${{ matrix.fapi }}/" gradle.properties
+          sed -i "s/^loader_version=.*/loader_version=${{ matrix.loader }}/" gradle.properties
+          sed -i "s/^loom_version=.*/loom_version=${{ matrix.loom }}/" gradle.properties
+          sed -i "s/^java_release=.*/java_release=${{ matrix.java }}/" gradle.properties
+          echo "=== gradle.properties ==="; cat gradle.properties
+      - name: Build Fabric mod (MC ${{ matrix.mc }})
         working-directory: fabric
         run: gradle build --no-daemon
-
-      - name: Upload fabric jar
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BotSentinel-fabric
+          name: fabric-${{ matrix.mc }}
           path: fabric/build/libs/*.jar
           if-no-files-found: error
 
+  # ================= Forge 模组端 (每版本一个 jar) =================
   build-forge:
-    name: Mod (Forge ${{ github.event.inputs.mod_mc_version || '1.21.4' }})
+    needs: resolve
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.resolve.outputs.forge-matrix) }}
+    continue-on-error: true
     steps:
       - name: Checkout forge branch
         uses: actions/checkout@v4
         with:
           ref: forge
           path: forge
-
-      - name: Set up JDK 21
+      - name: Set up JDK ${{ matrix.java }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
-
-      - name: Setup Gradle 8.10.2 (ForgeGradle 6 requires <9)
+          java-version: ${{ matrix.java }}
+      - name: Setup Gradle ${{ matrix.gradle }}
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.10.2'
-
-      - name: Override MC version (manual input)
-        if: ${{ github.event.inputs.mod_mc_version != '' }}
+          gradle-version: ${{ matrix.gradle }}
+      - name: 注入版本参数 (MC ${{ matrix.mc }} / Forge ${{ matrix.forge }})
         working-directory: forge
         run: |
-          V="${{ github.event.inputs.mod_mc_version }}"
-          sed -i "s/^minecraft_version=.*/minecraft_version=$V/" gradle.properties
-          echo "已切换 MC 版本: $V (注意 forge 版本号也需匹配, 否则构建失败)"
-
-      - name: Build Forge mod
+          sed -i "s/^minecraft_version=.*/minecraft_version=${{ matrix.mc }}/" gradle.properties
+          sed -i "s/^forge_version=.*/forge_version=${{ matrix.forge }}/" gradle.properties
+          sed -i "s/^forgegradle_version=.*/forgegradle_version=${{ matrix.fg }}/" gradle.properties
+          sed -i "s/^java_release=.*/java_release=${{ matrix.java }}/" gradle.properties
+      - name: Build Forge mod (MC ${{ matrix.mc }})
         working-directory: forge
         run: gradle build --no-daemon
-
-      - name: Upload forge jar
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BotSentinel-forge
+          name: forge-${{ matrix.mc }}
           path: forge/build/libs/*.jar
           if-no-files-found: error
 
+  # ================= Release 自动排版发布 (tag 触发) =================
   release:
-    name: Release (tag v*)
-    needs: [ build-plugin, build-fabric, build-forge ]
     if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-plugin, build-fabric, build-forge]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download all artifacts
+      - name: 下载全部产物
         uses: actions/download-artifact@v4
         with:
-          path: dist
-
-      - name: Organize release files
+          path: artifacts
+      - name: 整理文件 + 生成排版正文
         run: |
           mkdir -p release
-          find dist -name "*.jar" ! -name "*-sources.jar" ! -name "*original*" -exec cp {} release/ \;
+          # 平铺所有 jar
+          find artifacts -name "*.jar" -exec cp {} release/ \;
           ls -la release/
-
-      - name: Create formatted release
+          VER="${GITHUB_REF_NAME#v}"
+          # 版本排序辅助
+          vnum() { echo "$1" | awk -F. '{printf "%d%04d%04d", $1, $2, ($3?0+$3:0)}'; }
+          {
+            echo "# BotSentinel $GITHUB_REF_NAME"
+            echo
+            echo "> 无感风控反机器人: 进服前拦截(QQ群零感知) · AI策略评分引擎 · 特征库自动更新 · 真人封禁网段追踪 · IP归属地拦截"
+            echo
+            echo "## 插件端 (Folia / Paper / Spigot / Purpur)"
+            echo
+            echo "| 文件 | 适用 | 大小 |"
+            echo "|---|---|---|"
+            for f in release/BotSentinel-*.jar; do
+              [[ "$f" == *fabric* || "$f" == *forge* ]] && continue
+              echo "| \`$(basename $f)\` | MC 1.20 ~ 26.2 · Java 17~25 | $(du -h "$f" | cut -f1) |"
+            done
+            echo
+            echo "## Fabric 模组端"
+            echo
+            echo "| 文件 | MC 版本 | Java | 大小 |"
+            echo "|---|---|---|---|"
+            for f in $(ls release/BotSentinel-fabric-*.jar | sort -t c -k2 -g); do
+              mc=$(basename "$f" | sed 's/.*-mc\(.*\)-.*/\1/')
+              num=$(vnum "$mc")
+              if [ "$num" -lt 10202 ]; then j=17; elif [ "$num" -lt 26000 ]; then j=21; else j=25; fi
+              echo "| \`$(basename $f)\` | $mc | $j | $(du -h "$f" | cut -f1) |"
+            done
+            echo
+            echo "## Forge 模组端"
+            echo
+            echo "| 文件 | MC 版本 | Java | 大小 |"
+            echo "|---|---|---|---|"
+            for f in $(ls release/BotSentinel-forge-*.jar | sort -t c -k2 -g); do
+              mc=$(basename "$f" | sed 's/.*-mc\(.*\)-.*/\1/')
+              num=$(vnum "$mc")
+              if [ "$num" -lt 10202 ]; then j=17; elif [ "$num" -lt 26000 ]; then j=21; else j=25; fi
+              echo "| \`$(basename $f)\` | $mc | $j | $(du -h "$f" | cut -f1) |"
+            done
+            echo
+            echo "## 安装"
+            echo
+            echo "- **插件端**: 放入 \`plugins/\`, 支持核心: Folia / Paper / Spigot / Purpur (1.20~26.2)"
+            echo "- **Fabric 端**: 放入 \`mods/\`, 需同时安装 [Fabric API](https://modrinth.com/mod/fabric-api) 对应版本"
+            echo "- **Forge 端**: 放入 \`mods/\`, 服务端专用"
+            echo "- 全平台首次启动自动下载 IP 归属地库(ip2region, 国内镜像优先), /atb geo on 开启归属地拦截"
+            echo
+            echo "## 本版更新 ($GITHUB_REF_NAME)"
+            echo "- 修复: 归属地库首次下载失败(geo 目录不存在 + 国内镜像不可达) → 9 镜像池+目录自动创建+错误分类"
+            echo "- 新增: Fabric/Forge 模组端 **MC 1.20.1 → 26.2 全版本** jar(CI 自适应构建, 上表按版本下载)"
+            echo "- 优化: mod 端按版本条件编译/反射取IP, 跨版本零映射依赖; Forge 1.20.1 SRG 重映射修复"
+            echo "- AI: 在线学习持续自动训练(model.json 持久化), 规则保险丝独立保证真人零误伤"
+            echo
+          } > release_body.md
+          echo "=== Release 正文预览 ==="; head -40 release_body.md
+      - name: 创建 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: release_body.md
           files: release/*.jar
-          generate_release_notes: true
-          body: |
-            # BotSentinel ${{ github.ref_name }}
-
-            > 无感风控反机器人 · 进服前拦截(QQ群零感知) · AI策略评分 · 特征库自动进化 · 真人封禁四重追踪 · IP归属地拦截
-
-            ## 📦 按你的服务端选择下载
-
-            | 平台 | 文件 | 适用 |
-            |------|------|------|
-            | **Folia / Lophine / Luminol / Paper / Purpur / Spigot** | `BotSentinel-2.3.jar` | 插件, MC 1.20 ~ 26.2, Java 17-25 |
-            | **Fabric** | `BotSentinel-*-fabric*.jar` | Fabric 服务端 mod, MC 1.21.4 |
-            | **Forge** | `BotSentinel-*-forge*.jar` | Forge 服务端 mod, MC 1.21.4 |
-
-            ## 🚀 安装
-
-            **插件端**: 丢进 `plugins/` 重启即可。旧版本配置文件**自动迁移**(自动备份+补新键, 你的设置不会丢)。
-
-            **mod 端**: 丢进 `mods/` 重启。
-
-            ## ✨ 本版亮点
-
-            - **AI 策略评分引擎**: 规则启发式 + bigram 语言模型 + 信息熵 + 在线逻辑回归, 加权融合; 真人零误伤保险丝保持数学不变
-            - **IP 归属地库修复**: 不管开关与否, 启动即自动下载/更新本地库(多镜像), `/atb geo on` 即开即用
-            - **配置自动迁移**: v2.0~v2.2 旧配置升级自动备份, 用户设置 100% 保留
-            - **登录命令自适应**: 不再绑定特定登录插件, 任意服务器环境自动学习本服注册命令
-            - **Java 17-25 / MC 1.20-26.2**: 一个 jar 全版本通吃
-
-            ## 🛠 管理
-
-            `/atb help` 查看全部命令 · `/atb stats` 风控总览 · `/atb engine <名>` AI评分明细 · `/atb geo status` 归属地库状态
+          fail_on_unmatched_files: true
