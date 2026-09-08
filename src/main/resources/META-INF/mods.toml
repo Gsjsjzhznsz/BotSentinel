@@ -1,11 +1,11 @@
 modLoader="javafml"
-loaderVersion="[54,)"
+loaderVersion="[46,)"
 license="MIT"
 issueTrackerURL="https://github.com/Gsjsjzhznsz/BotSentinel/issues"
 
 [[mods]]
 modId="botsentinel"
-version="2.3.0"
+version="${file.jarVersion}"
 displayName="BotSentinel"
 description='''
 无感风控反机器人 mod: 进服前拦截(QQ群零感知) + 特征库自动更新
@@ -17,13 +17,13 @@ displayURL="https://github.com/Gsjsjzhznsz/BotSentinel"
 [[dependencies.botsentinel]]
     modId="forge"
     mandatory=true
-    versionRange="[54,)"
+    versionRange="[46,)"
     ordering="NONE"
     side="SERVER"
 
 [[dependencies.botsentinel]]
     modId="minecraft"
     mandatory=true
-    versionRange="[1.21.4,1.22)"
+    versionRange="[1.20,)"
     ordering="NONE"
     side="SERVER"

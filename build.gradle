@@ -1,16 +1,46 @@
 plugins {
-    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'net.minecraftforge.gradle' version "${forgegradle_version}"
+    // v2.4: 生成 mixin refmap (1.20.1 SRG 运行时必需; 1.20.2+ official 运行时不用 refmap 但无害)
+    id 'org.spongepowered.mixin' version '0.7.+'
     id 'java'
 }
 
 group = 'cn.botsentinel'
-version = '2.3.0'
-base { archivesName = 'BotSentinel-${project.version}-forge' }
+version = project.mod_version
+// v2.4 修复: 单引号不插值 bug + jar 名带 MC 版本(CI 矩阵产出可区分)
+base { archivesName = "BotSentinel-forge-mc${project.minecraft_version}" }
 
-java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+// ===== v2.4 跨版本自适应: 按 minecraft_version 裁剪源码 =====
+// MC 1.20.5 才引入签名命令包(ServerboundChatCommandSignedPacket), 1.20.1 无此类。
+def _m = (project.minecraft_version =~ /^(\d+)\.(\d+)(?:\.(\d+))?/)
+if (!_m.find()) throw new GradleException("无法解析 minecraft_version: " + project.minecraft_version)
+def mcComparable = (_m.group(1) as int) * 10000 + (_m.group(2) as int) * 100 + (_m.group(3) ? (_m.group(3) as int) : 0)
+def signedSupported = mcComparable >= 1 * 10000 + 20 * 100 + 5   // >= 1.20.5
+// Forge 1.20.1 及更早: 运行时是 SRG 命名, mod jar 必须 reobf(SRG); 1.20.2+ 运行时即 official, 不需要
+def reobfNeeded = mcComparable < 1 * 10000 + 20 * 100 + 2
+// canPlayerLogin 签名: 1.20.1- 是 (SocketAddress, GameProfile), 1.20.2+ 是 (ServerLoginPacketListenerImpl, GameProfile)
+def legacyPlayerList = mcComparable < 1 * 10000 + 20 * 100 + 2
+if (!signedSupported) {
+    sourceSets.main.java { exclude '**/SignedGamePacketListenerMixin.java' }
+    logger.lifecycle("BotSentinel: MC {} < 1.20.5 -> 排除签名命令 mixin", project.minecraft_version)
+}
+if (legacyPlayerList) {
+    sourceSets.main.java { exclude '**/PlayerListMixin.java' }
+} else {
+    sourceSets.main.java { exclude '**/PlayerListLegacyMixin.java' }
+}
+if (reobfNeeded) {
+    logger.lifecycle("BotSentinel: MC {} < 1.20.2 -> jar 将执行 reobfJar(SRG 重映射) + 生成 mixin refmap", project.minecraft_version)
+}
+
+mixin {
+    add sourceSets.main, 'botsentinel.refmap.json'
+    config 'botsentinel.mixins.json'
+}
 
 minecraft {
-    mappings channel: 'official', version: '1.21.4'
+    // official 映射随 MC 版本走
+    mappings channel: 'official', version: project.minecraft_version
     // 运行配置(可选): gradle runServer
     runs {
         server {
@@ -29,20 +59,48 @@ dependencies {
 
     // IP 归属地离线库(打进 jar)
     implementation 'org.lionsoul:ip2region:2.7.0'
+
+    // mixin 注解处理器(生成 SRG refmap)
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 }
+
+// v2.4: Java 版本由 gradle.properties 注入 (1.20.1~1.20.4=17, 1.20.5+=21, 26.x=25)
+// 编译用 runner JDK + options.release, 不依赖本机是否装了对应 toolchain
+int JR = (project.hasProperty('java_release') ? project.property('java_release') : '21') as int
 
 tasks.withType(JavaCompile).configureEach {
     it.options.encoding = 'UTF-8'
-    it.options.release = 21
+    it.options.release = JR
+}
+
+processResources {
+    // v2.4: 版本标志作为任务输入 —— 换 MC 版本构建时强制重跑(否则 UP-TO-DATE 复用旧资源)
+    inputs.property 'signedSupported', signedSupported
+    inputs.property 'legacyPlayerList', legacyPlayerList
+    inputs.property 'reobfNeeded', reobfNeeded
+    filesMatching('botsentinel.mixins.json') {
+        filter { line ->
+            def out = line
+            // 仅 1.20.5+ 构建时追加签名命令条目
+            if (signedSupported) out = out.replace('"PlayerListMixin"',
+                    '"PlayerListMixin",\n    "SignedGamePacketListenerMixin"')
+            // 1.20.1- 换用 Legacy 版 PlayerList mixin(SocketAddress 签名)
+            if (legacyPlayerList) out = out.replace('"PlayerListMixin"', '"PlayerListLegacyMixin"')
+            // 仅 1.20.1 及更早(SRG 运行时)注入 refmap 声明
+            if (reobfNeeded) out = out.replace('"required": true,',
+                    '"required": true,\n  "refmap": "botsentinel.refmap.json",')
+            out
+        }
+    }
 }
 
 jar {
     manifest {
         attributes([
                 'Specification-Title'     : 'botsentinel',
-                'Specification-Version'   : '2.2.0',
+                'Specification-Version'   : project.mod_version,
                 'Implementation-Title'    : 'BotSentinel',
-                'Implementation-Version'  : project.version,
+                'Implementation-Version'  : project.mod_version,
                 // Forge 官方 mixin 支持: 声明配置文件
                 'MixinConfigs'            : 'botsentinel.mixins.json'
         ])
@@ -50,4 +108,10 @@ jar {
     from('LICENSE') {
         rename { "${it}_${project.base.archivesName.get()}" }
     }
+}
+
+// v2.4: 1.20.1- 构建 jar 后自动重映射为 SRG(运行时命名), 否则 mixin @Shadow 全部失效
+if (reobfNeeded) {
+    tasks.named('jar') { finalizedBy 'reobfJar' }
+    tasks.named('build') { dependsOn 'reobfJar' }
 }

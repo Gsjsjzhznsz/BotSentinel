@@ -5,4 +5,9 @@ pluginManagement {
     }
 }
 
+plugins {
+    // v2.4: 自动下载缺失的 JDK toolchain (FG6 内部固定要 JDK17, 本机没有时自动拉取)
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
 rootProject.name = 'botsentinel'
