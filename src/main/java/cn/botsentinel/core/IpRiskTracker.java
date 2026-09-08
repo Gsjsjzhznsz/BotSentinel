@@ -21,6 +21,7 @@ public class IpRiskTracker {
 
     private final Map<String, Window> windows = new ConcurrentHashMap<>();
     private final Map<String, Window> flashWindows = new ConcurrentHashMap<>();
+    private final Map<String, Window> blockedWindows = new ConcurrentHashMap<>();
     private final long windowMs;
 
     public IpRiskTracker(long windowMinutes) {
@@ -75,6 +76,18 @@ public class IpRiskTracker {
         }
     }
 
+    /** v2.3: 记录一次"进服前被拦"(机器人实锤失败); 返回窗口内计数 */
+    public int recordBlockedHit(String ip) {
+        if (ip == null || ip.isEmpty()) return 0;
+        Window w = blockedWindows.computeIfAbsent(ip.toLowerCase(Locale.ROOT), k -> new Window());
+        synchronized (w) {
+            long now = System.currentTimeMillis();
+            while (!w.stamps.isEmpty() && now - w.stamps.peekFirst() > windowMs) w.stamps.pollFirst();
+            w.stamps.addLast(now);
+            return w.stamps.size();
+        }
+    }
+
     public void cleanup() {
         long now = System.currentTimeMillis();
         for (Map.Entry<String, Window> en : windows.entrySet()) {
@@ -89,6 +102,13 @@ public class IpRiskTracker {
                 while (!en.getValue().stamps.isEmpty() && now - en.getValue().stamps.peekFirst() > windowMs)
                     en.getValue().stamps.pollFirst();
                 if (en.getValue().stamps.isEmpty()) flashWindows.remove(en.getKey());
+            }
+        }
+        for (Map.Entry<String, Window> en : blockedWindows.entrySet()) {
+            synchronized (en.getValue()) {
+                while (!en.getValue().stamps.isEmpty() && now - en.getValue().stamps.peekFirst() > windowMs)
+                    en.getValue().stamps.pollFirst();
+                if (en.getValue().stamps.isEmpty()) blockedWindows.remove(en.getKey());
             }
         }
     }

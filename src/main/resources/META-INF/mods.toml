@@ -5,7 +5,7 @@ issueTrackerURL="https://github.com/Gsjsjzhznsz/BotSentinel/issues"
 
 [[mods]]
 modId="botsentinel"
-version="2.2.0"
+version="2.3.0"
 displayName="BotSentinel"
 description='''
 无感风控反机器人 mod: 进服前拦截(QQ群零感知) + 特征库自动更新

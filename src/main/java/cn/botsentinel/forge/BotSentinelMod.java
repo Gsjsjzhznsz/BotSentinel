@@ -134,6 +134,7 @@ public class BotSentinelMod {
             try {
                 st.library.saveIfDirtyAsync();
                 st.stats.saveIfDirtyAsync();
+                st.scoreEngine.flush();
                 st.ipTracker.cleanup();
             } catch (Exception ignored) {}
         }, saveMs, saveMs, TimeUnit.MILLISECONDS);
