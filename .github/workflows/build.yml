@@ -71,6 +71,7 @@ jobs:
             fi
             # ---- yarn 映射实时解析(版本不存在则跳过) ----
             yarn=$(curl -sf --retry 3 "https://meta.fabricmc.net/v2/versions/yarn/$mc" | jq -r '.[0].version // empty')
+            if [ "$mc" = "1.21.11" ]; then echo "SKIP fabric $mc: loom 1.12+Gradle9 工具链组合待验证(fabric-api javadoc 处理 bug)"; echo "SKIP_FABRIC $mc (loom 工具链跟进中)" >> skip.log; continue; fi
             if [ -z "$yarn" ]; then echo "SKIP fabric $mc: yarn 映射不存在"; echo "SKIP_FABRIC $mc (yarn 不存在)" >> skip.log; continue; fi
             # ---- fabric-api 兼容版实时解析 ----
             fapi=$(curl -sf --retry 3 "https://api.modrinth.com/v2/project/fabric-api/version?game_versions=%5B%22$mc%22%5D&loaders=%5B%22fabric%22%5D" | jq -r '.[0].version_number // empty')
@@ -106,6 +107,7 @@ jobs:
               echo "SKIP_FORGE $mc (FG 未支持 26.x)" >> skip.log
               continue
             fi
+            if [ "$mc" = "1.21.11" ]; then echo "SKIP forge $mc: 官方 userdev jar duplicate-entry bug, 等 Forge 修复"; echo "SKIP_FORGE $mc (userdev bug)" >> skip.log; continue; fi
             forge=$(jq -r ".promos[\"$mc-latest\"] // empty" promo.json)
             if [ -z "$forge" ]; then echo "SKIP forge $mc: 官方无该版本构建"; echo "SKIP_FORGE $mc (无 Forge 构建)" >> skip.log; continue; fi
             entries="$entries{\"mc\":\"$mc\",\"java\":$java,\"gradle\":\"$gradle\",\"forge\":\"$forge\",\"fg\":\"$fg\"},"
