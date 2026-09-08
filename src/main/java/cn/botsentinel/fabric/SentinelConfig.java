@@ -33,6 +33,7 @@ public class SentinelConfig {
     public boolean ipBanEnabled = true;
     public int ipBanMinutes = 120;
     public int autoBanCount = 6;
+    public int autoBanBlockedCount = 3;  // v2.3: 同IP被拦机器人达N次 -> 更早封IP
 
     public int windowMinutes = 10;
     public boolean prefixLearn = true;
@@ -42,12 +43,22 @@ public class SentinelConfig {
     public int decayDays = 30;
     public double removeBelow = 0.12;
 
+    // v2.3 AI 评分引擎
+    public String scoringEngine = "ensemble";
+    public double scoringWHeuristic = 1.0;
+    public double scoringWMarkov = 0.5;
+    public double scoringWEntropy = 0.35;
+    public double scoringWLogistic = 0.6;
+    public boolean scoringOnlineLearn = true;
+
     public int watchSeconds = 45;
     public int instantRegisterSeconds = 8;
     public int confirmAuthAttempts = 2;
     public int autoTrustMinutes = 10;
     public List<String> authCommands = Arrays.asList(
             "e", "l", "li", "log", "login", "reg", "regi", "regis", "register");
+    public boolean anyCommandDetect = true;      // v2.3: 任意命令+随机参数也算信号
+    public boolean autoLearnAuthCommands = true; // v2.3: 实锤bot命令自适应学习
 
     public List<String> builtInSignatures = Arrays.asList("xemcchat", "xemc.cn");
     public boolean genericDomainHeuristic = true;
@@ -68,6 +79,7 @@ public class SentinelConfig {
     // 归属地拦截
     public boolean geoEnabled = false;
     public boolean geoMainlandOnly = true;
+    public boolean geoPreDownload = true;   // v2.3: 启动即准备本地库(不管开关)
     public List<String> geoBlockedRegions = new ArrayList<>();
     public List<String> geoAllowedRegions = new ArrayList<>();
     public List<String> geoAllowIps = new ArrayList<>();

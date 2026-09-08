@@ -28,66 +28,29 @@ public class RiskScorer {
     public RiskScorer() {
     }
 
-    /** 名字随机性 0-95 (仅看名字本身) */
+    private ScoreEngine engine = null;
+
+    /** 绑定策略引擎(SentinelState 初始化时调用) */
+    public void bindEngine(ScoreEngine engine) { this.engine = engine; }
+
+    /**
+     * 保险丝随机性 0-95 (v2.3): 绑定引擎后 = 规则启发式校准分(ensemble),
+     * 未绑定 = 内置临时引擎, 行为一致。
+     */
     public int randomness(String name) {
-        if (name == null || name.isEmpty()) return 0;
-        int len = name.length();
-        int upper = 0, lower = 0, digit = 0, other = 0;
-        for (char c : name.toCharArray()) {
-            if (Character.isUpperCase(c)) upper++;
-            else if (Character.isLowerCase(c)) lower++;
-            else if (Character.isDigit(c)) digit++;
-            else other++;
-        }
-        boolean lettersOnly = (upper + lower) == len;
-        if (!lettersOnly) return 0;   // 带数字/下划线/符号的名字直接0分(人类习惯)
-
-        // 大小写混合的无规律字母串
-        int base;
-        if (len >= 8 && len <= 14 && upper >= 2 && lower >= 4) base = 25;
-        else if (len >= 6 && upper >= 1 && lower >= 1) base = 15;
-        else return 0;
-
-        int score = base;
-        String low = name.toLowerCase(Locale.ROOT);
-
-        // 元音占比极低 (真人拼音/英文名不会低于0.25)
-        int vowels = 0;
-        for (char c : low.toCharArray()) if (isVowel(c)) vowels++;
-        double vowelRatio = (double) vowels / len;
-        if (vowelRatio < 0.25) score += 15;
-
-        // 长辅音串 (随机串特征; "Wnyr"=4, "skBHh"=5)
-        int maxRun = 0, run = 0, openingRun = 0;
-        boolean openingDone = false;
-        for (char c : low.toCharArray()) {
-            if (!isVowel(c)) {
-                run++;
-                if (!openingDone) openingRun++;
-            } else {
-                if (run > maxRun) maxRun = run;
-                run = 0;
-                openingDone = true;
-            }
-        }
-        if (run > maxRun) maxRun = run;
-        if (maxRun >= 4) score += 25;
-        else if (maxRun == 3) score += 10;
-        if (openingRun >= 3) score += 15;
-
-        // 大写孤岛数量 (Wnyr|L|u|Sk|B|H|h|W|O -> 7个短岛; XiaoMing只有2个)
-        int islands = countUpperIslands(name);
-        if (islands >= 4) score += 20;
-
-        // 连续大写长串 (cUT|cq|LBIJCABU -> 8连大写, 纯随机生成特征)
-        if (longestUpperRun(name) >= 4) score += 20;
-
-        // 【真人保险】含常见英文/拼音词(MC社区命名习惯) -> 大幅减免
-        // 如 MinecraftDBS(含minecraft)=25分 / XiaoMing(含xiao,ming)=0分
-        if (containsCommonWord(low)) score -= 25;
-
-        return Math.max(0, Math.min(95, score));
+        return engine().randomness(name);
     }
+
+    /** v2.3: AI 小模型加分 0-25(只参与总分, 不碰保险丝) */
+    public int modelBoost(String name) {
+        return engine().modelBoost(name);
+    }
+
+    private ScoreEngine engine() {
+        if (engine == null) engine = new ScoreEngine(null);
+        return engine;
+    }
+
 
     /** 连续大写字母的最长长度 */
     private static int longestUpperRun(String name) {

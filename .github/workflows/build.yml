@@ -32,7 +32,7 @@ jobs:
       - name: Upload mod jar
         uses: actions/upload-artifact@v4
         with:
-          name: BotSentinel-2.2-fabric
+          name: BotSentinel-2.3-fabric
           path: build/libs/*.jar
 
       - name: Release on tag

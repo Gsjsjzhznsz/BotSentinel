@@ -5,6 +5,7 @@ import cn.botsentinel.core.IpRiskTracker;
 import cn.botsentinel.core.IpUtil;
 import cn.botsentinel.core.LibraryStore;
 import cn.botsentinel.core.RiskScorer;
+import cn.botsentinel.core.ScoreEngine;
 import cn.botsentinel.core.StatsStore;
 import net.fabricmc.loader.api.FabricLoader;
 
@@ -33,6 +34,7 @@ public final class SentinelState {
     public LibraryStore library;
     public StatsStore stats;
     public RiskScorer scorer;
+    public ScoreEngine scoreEngine;
     public IpRiskTracker ipTracker;
     public GeoRegionManager geo;
 
@@ -50,15 +52,19 @@ public final class SentinelState {
         library = new LibraryStore(dir.resolve("library.json"));
         stats = new StatsStore(dir.resolve("stats.json"));
         library.configure(config.decayDays, config.removeBelow);
+        scoreEngine = new ScoreEngine(dir.resolve("model.json"));
+        scoreEngine.configure(config.scoringEngine, config.scoringWHeuristic, config.scoringWMarkov,
+                config.scoringWEntropy, config.scoringWLogistic, config.scoringOnlineLearn);
         scorer = new RiskScorer();
+        scorer.bindEngine(scoreEngine);
         ipTracker = new IpRiskTracker(config.windowMinutes);
         geo = new GeoRegionManager(dir.resolve("geo").resolve("ip2region.xdb"),
                 s -> System.out.println("[BotSentinel] " + s),
                 s -> System.out.println("[BotSentinel/WARN] " + s));
         geo.configure(config.geoEnabled, config.geoMainlandOnly, config.geoBlockedRegions,
                 config.geoAllowedRegions, config.geoAllowIps, config.geoUpdateDays);
-        if (config.geoEnabled) geo.initAsync();
-        log("BotSentinel v2.2 (Fabric) 已加载 | 模式: " + config.mode
+        geo.initAsync(); // v2.3: 不管开关都准备本地库
+        log("BotSentinel v2.3 (Fabric) 已加载 | 评分: " + scoreEngine.engineName() | 模式: " + config.mode
                 + " | 特征库: 假人名" + library.botNameCount() + " 形态" + library.shapeCount()
                 + " 签名" + library.signatureCount() + " 风险IP" + library.botIpCount()
                 + " | 地区拦截: " + (config.geoEnabled ? "开启" : "关闭"));
@@ -71,7 +77,9 @@ public final class SentinelState {
         library.configure(fresh.decayDays, fresh.removeBelow);
         geo.configure(fresh.geoEnabled, fresh.geoMainlandOnly, fresh.geoBlockedRegions,
                 fresh.geoAllowedRegions, fresh.geoAllowIps, fresh.geoUpdateDays);
-        if (fresh.geoEnabled) geo.initAsync();
+        scoreEngine.configure(fresh.scoringEngine, fresh.scoringWHeuristic, fresh.scoringWMarkov,
+                fresh.scoringWEntropy, fresh.scoringWLogistic, fresh.scoringOnlineLearn);
+        geo.initAsync(); // v2.3: pre-download 语义
     }
 
     // ---------- 进服前判定(checkCanJoin mixin 调用, 返回 null=放行, 非 null=拒因) ----------
@@ -164,6 +172,7 @@ public final class SentinelState {
 
         // 7) 评分决策
         int randomness = scorer.randomness(name);
+        int modelBonus = scorer.modelBoost(name); // v2.3: AI小模型加分(不碰保险丝)
         double shapeConf = library.shapeConfidence(name);
         int shapeBonus = shapeConf >= 0.3 ? (int) Math.min(45, 45 * shapeConf) : 0;
         double ipConf = library.ipConfidence(ip);
@@ -174,7 +183,7 @@ public final class SentinelState {
         int ipBonus = (int) Math.min(45, ipConf * 40 + prefixConf * 20 + windowBonus);
         int trust = library.isVerifiedPlayer(name) || config.isWhitelisted(name) ? 999
                 : library.isSeededPlayer(name) ? 20 : 0;
-        int score = Math.max(0, randomness + shapeBonus + ipBonus - trust);
+        int score = Math.max(0, randomness + modelBonus + shapeBonus + ipBonus - trust);
 
         boolean knownBot = library.isKnownBotName(name);
         boolean block;
@@ -211,6 +220,9 @@ public final class SentinelState {
             int count = windowCount;
             if (config.ipBanEnabled && count >= config.autoBanCount) {
                 banIp(ip, config.ipBanMinutes, "窗口内新账号达" + count + "个");
+            } else if (config.ipBanEnabled && library.getBannedUntil(ip) <= 0
+                    && ipTracker.recordBlockedHit(ip) >= config.autoBanBlockedCount) {
+                banIp(ip, config.ipBanMinutes, "窗口内被拦机器人达" + config.autoBanBlockedCount + "个");
             }
             alert("block", "[进服拦截] 账号: " + name + " | IP: " + ip + " | " + reason + " | 窗口新账号: " + count);
             sessionScores.put(key, -100);
@@ -239,6 +251,7 @@ public final class SentinelState {
         if (!sessionScores.containsKey(key) || sessionScores.get(key) > -100) {
             if (minutes >= config.autoTrustMinutes) {
                 library.addKnownPlayer(name, true, "自动信任:在线" + minutes + "分钟无异常");
+                scoreEngine.learnHuman(name);
             }
             // 闪进闪退检测(v2.2)
             if (dwellMs < 20_000L && !library.isVerifiedPlayer(name)) {
@@ -267,7 +280,8 @@ public final class SentinelState {
         String root = parts[0].toLowerCase(Locale.ROOT);
         int colon = root.indexOf(':');
         if (colon >= 0) root = root.substring(colon + 1);
-        if (!config.authCommands.contains(root)) return true;
+        boolean authListed = config.authCommands.contains(root) || library.isLearnedAuthCommand(root);
+        if (!authListed && !config.anyCommandDetect) return true;
 
         long sinceJoin = joinStamps.containsKey(key) ? System.currentTimeMillis() - joinStamps.get(key)[0] : Long.MAX_VALUE;
         int randomness = scorer.randomness(name);
@@ -292,13 +306,27 @@ public final class SentinelState {
         long[] stamp = joinStamps.get(key);
         if (randomArgs && sinceJoin <= config.instantRegisterSeconds * 1000L
                 && (randomness >= 50 || session >= 45 || ipCount >= 2)) {
-            confirmBot(name, ip, "秒发注册指令(" + (sinceJoin / 1000) + "秒内, 参数随机串)");
-            return false;
+            if (authListed) {
+                if (config.autoLearnAuthCommands) library.learnAuthCommand(root, "实锤bot自动学习");
+                confirmBot(name, ip, "秒发注册指令(" + (sinceJoin / 1000) + "秒内, 参数随机串)");
+                return false;
+            }
+            // 非注册类命令: 降级为计数信号(防误伤)
+            int weak = sessionScore(name) + 1;
+            sessionScores.put(key, weak);
+            if (weak >= config.confirmAuthAttempts + 1 && sinceJoin <= config.watchSeconds * 1000L) {
+                if (config.autoLearnAuthCommands) library.learnAuthCommand(root, "实锤bot自动学习");
+                confirmBot(name, ip, "盯防期内连续可疑命令" + weak + "次(参数随机串)");
+                return false;
+            }
+            return true;
         }
+        if (!authListed) return true;
         // 累计尝试(简单计数: 用 sessionScores 旁路计数)
         int attempts = sessionScore(name) + 1;
         sessionScores.put(key, attempts);
         if (attempts >= config.confirmAuthAttempts + 1 && sinceJoin <= config.watchSeconds * 1000L) {
+            if (config.autoLearnAuthCommands && randomArgs) library.learnAuthCommand(root, "实锤bot自动学习");
             confirmBot(name, ip, "盯防期内注册类指令" + attempts + "次(名字随机度" + randomness + ")");
             return false;
         }
@@ -355,6 +383,7 @@ public final class SentinelState {
             library.recordBotIp(ip, 0.35, reason);
             if (config.prefixLearn) library.recordIpPrefix(ip, 0.08, reason);
         }
+        scoreEngine.learnBot(name); // v2.3: 小模型在线训练
         stats.d.disposedBots++;
         stats.touch();
         if (config.ipBanEnabled) banIp(ip, config.ipBanMinutes, reason);

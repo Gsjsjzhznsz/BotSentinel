@@ -33,15 +33,14 @@ public class BotSentinelMod implements DedicatedServerModInitializer {
 
         ServerLifecycleEvents.SERVER_STARTING.register(s -> {
             server = s;
-            if (SentinelState.INSTANCE.config.geoEnabled) {
-                SentinelState.INSTANCE.geo.initAsync();
-            }
+            SentinelState.INSTANCE.geo.initAsync(); // v2.3: 不管开关都准备本地库
             startTimer();
         });
         ServerLifecycleEvents.SERVER_STOPPED.register(s -> {
             stopTimer();
             SentinelState.INSTANCE.library.forceSave();
             SentinelState.INSTANCE.stats.forceSave();
+            SentinelState.INSTANCE.scoreEngine.flush();
             server = null;
         });
 
@@ -78,6 +77,7 @@ public class BotSentinelMod implements DedicatedServerModInitializer {
             try {
                 st.library.saveIfDirtyAsync();
                 st.stats.saveIfDirtyAsync();
+                st.scoreEngine.flush();
                 st.ipTracker.cleanup();
             } catch (Exception ignored) {}
         }, saveMs, saveMs, TimeUnit.MILLISECONDS);
