@@ -20,6 +20,14 @@ def signedSupported = mcComparable >= 1 * 10000 + 20 * 100 + 5   // >= 1.20.5
 def reobfNeeded = mcComparable < 1 * 10000 + 20 * 100 + 2
 // canPlayerLogin 签名: 1.20.1- 是 (SocketAddress, GameProfile), 1.20.2+ 是 (ServerLoginPacketListenerImpl, GameProfile)
 def legacyPlayerList = mcComparable < 1 * 10000 + 20 * 100 + 2
+// Forge 1.21.6+ 换用 EventBus 7(包名 eventbus7.api), 之前是 EventBus 6(eventbus.api)
+def eventbus7 = mcComparable >= 1 * 10000 + 21 * 100 + 6
+if (eventbus7) {
+    sourceSets.main.java { exclude '**/SentinelEventsEB6.java' }
+    logger.lifecycle("BotSentinel: MC {} >= 1.21.6 -> EventBus 7", project.minecraft_version)
+} else {
+    sourceSets.main.java { exclude '**/SentinelEventsEB7.java' }
+}
 if (!signedSupported) {
     sourceSets.main.java { exclude '**/SignedGamePacketListenerMixin.java' }
     logger.lifecycle("BotSentinel: MC {} < 1.20.5 -> 排除签名命令 mixin", project.minecraft_version)
@@ -75,7 +83,8 @@ tasks.withType(JavaCompile).configureEach {
 
 processResources {
     // v2.4: 版本标志作为任务输入 —— 换 MC 版本构建时强制重跑(否则 UP-TO-DATE 复用旧资源)
-    inputs.property 'signedSupported', signedSupported
+    inputs.property "signedSupported", signedSupported
+    inputs.property "eventbus7", eventbus7
     inputs.property 'legacyPlayerList', legacyPlayerList
     inputs.property 'reobfNeeded', reobfNeeded
     filesMatching('botsentinel.mixins.json') {

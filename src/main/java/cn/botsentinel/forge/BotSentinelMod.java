@@ -6,12 +6,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.RegisterCommandsEvent;
-import net.minecraftforge.event.ServerChatEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.event.server.ServerStartedEvent;
-import net.minecraftforge.event.server.ServerStoppingEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.loading.FMLPaths;
 
@@ -30,61 +24,13 @@ import java.util.concurrent.TimeUnit;
 public class BotSentinelMod {
 
     private static volatile MinecraftServer server;
+    static void setServer(MinecraftServer s) { server = s; }
     private static ScheduledExecutorService timer;
 
     public BotSentinelMod() {
-        MinecraftForge.EVENT_BUS.register(this);
+        // v2.4: 事件处理拆分到 SentinelEvents(EB6/EB7 两版, 构建按 MC 版本二选一)
+        MinecraftForge.EVENT_BUS.register(new SentinelEvents());
         SentinelState.INSTANCE.init();
-    }
-
-    // ---------- 生命周期 ----------
-    @SubscribeEvent
-    public void onServerStarted(ServerStartedEvent e) {
-        server = e.getServer();
-        if (SentinelState.INSTANCE.config.geoEnabled) {
-            SentinelState.INSTANCE.geo.initAsync();
-        }
-        startTimer();
-    }
-
-    @SubscribeEvent
-    public void onServerStopping(ServerStoppingEvent e) {
-        stopTimer();
-        SentinelState.INSTANCE.library.forceSave();
-        SentinelState.INSTANCE.stats.forceSave();
-        server = null;
-    }
-
-    @SubscribeEvent
-    public void onRegisterCommands(RegisterCommandsEvent e) {
-        ModCommands.register(e.getDispatcher());
-    }
-
-    // ---------- 进出服 ----------
-    @SubscribeEvent
-    public void onLoggedIn(PlayerEvent.PlayerLoggedInEvent e) {
-        if (!(e.getEntity() instanceof ServerPlayer p)) return;
-        SentinelState.INSTANCE.onJoin(p.getGameProfile().getName(), p.getIpAddress());
-    }
-
-    @SubscribeEvent
-    public void onLoggedOut(PlayerEvent.PlayerLoggedOutEvent e) {
-        if (!(e.getEntity() instanceof ServerPlayer p)) return;
-        SentinelState.INSTANCE.onQuit(p.getGameProfile().getName(), p.getIpAddress());
-    }
-
-    // ---------- 聊天守卫 ----------
-    @SubscribeEvent
-    public void onChat(ServerChatEvent e) {
-        ServerPlayer p = e.getPlayer();
-        boolean allow = SentinelState.INSTANCE.onChat(
-                p.getGameProfile().getName(), p.getIpAddress(), e.getRawText());
-        if (!allow) {
-            e.setCanceled(true);
-            if (SentinelState.INSTANCE.sessionScore(p.getGameProfile().getName()) == -100) {
-                p.connection.disconnect(Component.literal(SentinelState.INSTANCE.config.disposeMessage));
-            }
-        }
     }
 
     // ---------- 工具 ----------
@@ -121,7 +67,7 @@ public class BotSentinelMod {
         });
     }
 
-    private static void startTimer() {
+    static void startTimer() {
         stopTimer();
         timer = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "BotSentinel-Timer");
@@ -147,7 +93,7 @@ public class BotSentinelMod {
         }, 6 * 3600_000L, 6 * 3600_000L, TimeUnit.MILLISECONDS);
     }
 
-    private static void stopTimer() {
+    static void stopTimer() {
         if (timer != null) {
             timer.shutdownNow();
             timer = null;
