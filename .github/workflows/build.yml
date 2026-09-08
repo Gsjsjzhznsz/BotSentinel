@@ -62,9 +62,10 @@ jobs:
             # ---- Java 映射: 1.20.1~1.20.4=17, 1.20.5~1.21.x=21, 26.x=25 ----
             maj=$(echo "$mc" | cut -d. -f1); min=$(echo "$mc" | cut -d. -f2); pat=$(echo "$mc" | cut -d. -f3)
             num=$((maj*10000 + min*100 + ${pat:-0}))
-            if   [ "$num" -lt 10202 ]; then java=17; loom="1.9.2";          gradle="$GRADLE_FOR_OLD"
-            elif [ "$num" -lt 26000 ]; then java=21; loom="1.9.2";          gradle="$GRADLE_FOR_OLD"
-            else                           java=25; loom="1.11-SNAPSHOT";   gradle="$GRADLE_FOR_NEW"
+            # 1.20.1~1.20.4=12001~12004, 1.20.5+=12005, 1.21.x=12100+, 26.x=260100+
+            if   [ "$num" -lt 12005 ]; then java=17; loom="1.9.2";          gradle="$GRADLE_FOR_OLD"
+            elif [ "$num" -lt 260000 ]; then java=21; loom="1.9.2";          gradle="$GRADLE_FOR_OLD"
+            else                            java=25; loom="1.11-SNAPSHOT";   gradle="$GRADLE_FOR_NEW"
             fi
             # ---- yarn 映射实时解析(版本不存在则跳过) ----
             yarn=$(curl -sf --retry 3 "https://meta.fabricmc.net/v2/versions/yarn/$mc" | jq -r '.[0].version // empty')
@@ -95,9 +96,9 @@ jobs:
           for mc in $VERS; do
             maj=$(echo "$mc" | cut -d. -f1); min=$(echo "$mc" | cut -d. -f2); pat=$(echo "$mc" | cut -d. -f3)
             num=$((maj*10000 + min*100 + ${pat:-0}))
-            if   [ "$num" -lt 10202 ]; then java=17; gradle="8.10.2"; fg="[6.0,6.2)"
-            elif [ "$num" -lt 26000 ]; then java=21; gradle="8.10.2"; fg="[6.0,6.2)"
-            else                           java=25; gradle="$GRADLE_FOR_NEW"; fg="[6.0,6.2)"
+            if   [ "$num" -lt 12005 ]; then java=17; gradle="8.10.2"; fg="[6.0,6.2)"
+            elif [ "$num" -lt 260000 ]; then java=21; gradle="8.10.2"; fg="[6.0,6.2)"
+            else                            java=25; gradle="$GRADLE_FOR_NEW"; fg="[6.0,6.2)"
             fi
             forge=$(jq -r ".promos[\"$mc-latest\"] // empty" promo.json)
             if [ -z "$forge" ]; then echo "SKIP forge $mc: 官方无该版本构建"; echo "SKIP_FORGE $mc (无 Forge 构建)" >> skip.log; continue; fi
@@ -232,7 +233,7 @@ jobs:
           ls -la release/
           VER="${GITHUB_REF_NAME#v}"
           # 版本排序辅助
-          vnum() { echo "$1" | awk -F. '{printf "%d%04d%04d", $1, $2, ($3?0+$3:0)}'; }
+          vnum() { echo "$1" | awk -F. '{print $1*10000 + $2*100 + ($3?0+$3:0)}'; }
           {
             echo "# BotSentinel $GITHUB_REF_NAME"
             echo
@@ -254,7 +255,7 @@ jobs:
             for f in $(ls release/BotSentinel-fabric-*.jar | sort -t c -k2 -g); do
               mc=$(basename "$f" | sed 's/.*-mc\(.*\)-.*/\1/')
               num=$(vnum "$mc")
-              if [ "$num" -lt 10202 ]; then j=17; elif [ "$num" -lt 26000 ]; then j=21; else j=25; fi
+              if [ "$num" -lt 12005 ]; then j=17; elif [ "$num" -lt 260000 ]; then j=21; else j=25; fi
               echo "| \`$(basename $f)\` | $mc | $j | $(du -h "$f" | cut -f1) |"
             done
             echo
@@ -265,7 +266,7 @@ jobs:
             for f in $(ls release/BotSentinel-forge-*.jar | sort -t c -k2 -g); do
               mc=$(basename "$f" | sed 's/.*-mc\(.*\)-.*/\1/')
               num=$(vnum "$mc")
-              if [ "$num" -lt 10202 ]; then j=17; elif [ "$num" -lt 26000 ]; then j=21; else j=25; fi
+              if [ "$num" -lt 12005 ]; then j=17; elif [ "$num" -lt 260000 ]; then j=21; else j=25; fi
               echo "| \`$(basename $f)\` | $mc | $j | $(du -h "$f" | cut -f1) |"
             done
             echo
