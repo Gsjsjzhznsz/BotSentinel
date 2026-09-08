@@ -43,7 +43,7 @@ jobs:
           sed -i "s/^forge_version=.*/forge_version=$FORGE/" gradle.properties
           MAJ=$(echo "$V" | cut -d. -f1); MIN=$(echo "$V" | cut -d. -f2); PAT=$(echo "$V" | cut -d. -f3)
           NUM=$((MAJ*10000 + MIN*100 + ${PAT:-0}))
-          if [ "$NUM" -lt 10202 ]; then J=17; else J=21; fi
+          if [ "$NUM" -lt 12005 ]; then J=17; else J=21; fi
           sed -i "s/^java_release=.*/java_release=$J/" gradle.properties
           echo "构建 MC $V / Forge $FORGE / Java $J"
 
