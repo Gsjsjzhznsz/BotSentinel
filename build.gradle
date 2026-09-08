@@ -5,7 +5,7 @@ plugins {
 
 group = 'cn.botsentinel'
 version = '2.3.0'
-base { archivesName = 'BotSentinel-2.2-forge' }
+base { archivesName = 'BotSentinel-${project.version}-forge' }
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
