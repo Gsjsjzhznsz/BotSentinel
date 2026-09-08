@@ -1,16 +1,24 @@
 # ============================================================
-#  BotSentinel v2.2 配置文件
-#  无感风控反机器人 (Folia/Lophine 兼容, 不影响正常玩家)
+#  BotSentinel v2.3 配置文件
+#  无感风控反机器人 (Folia/Paper/Spigot 1.20-26.2 / Java 17-25)
 # ------------------------------------------------------------
-#  防线一览:
-#   [进服前] 登录阶段评分拦截 —— 不产生任何 join/quit 消息,
-#            easyBOT 桥完全无感知, QQ群静悄悄。
-#   [进服后] 行为实锤(秒发注册指令、被限速器踢、发广告、闪进闪退),
-#            一经确认: 踢出 + 临时IP封禁 + 自动学习特征。
-#   [特征库] 全自动更新: 每只落网 bot 都让下一只在进服前被拦。
-#            手动加错了? /atb undo 撤销 / /atb unlearn 移除。
-#   [地区拦截] IP归属地(离线库, 无API限制): /atb geo on 一键开启。
+#  两层防线:
+#   第一层 [进服前] 登录阶段评分, 命中即拒绝 —— 不产生任何
+#          join/quit 消息, easyBOT 桥完全无感知, QQ群静悄悄。
+#   第二层 [进服后] 对漏网 bot 行为实锤(秒发注册指令、被限速器
+#          踢、发广告), 一经确认: 踢出 + 临时IP封禁, 并自动把
+#          名字/名字形态/风险IP/广告签名写入特征库。
+#   => 特征库全自动更新: 每只落网 bot 都让下一只在进服前被拦。
+#
+#  [AI 评分引擎] 策略模式: 规则启发式 + bigram语言模型 + 信息熵
+#          + 在线逻辑回归, 加权融合, 越用越懂你的服务器。
+#  [地区拦截] IP归属地(离线库, 无API限制): /atb geo on 一键开启。
+#  [配置迁移] config-version 由插件自动维护, 旧配置升级自动备份,
+#          你改过的值永远不会被覆盖, 新选项自动补齐。
 # ============================================================
+
+# 配置结构版本(插件自动升级用, 请勿手动改)
+config-version: 4
 
 # 风控模式: block = 主动拦截 / observe = 仅观察记录
 mode: block
@@ -21,7 +29,7 @@ block-threshold: 70
 observe-threshold: 45
 
 # 【保险丝】拦截必须要求用户名随机性至少达到该分。
-# 保证拼音名(XiaoMing=25)/带数字名(23451qwert=0)/纯数字名(415411=0)
+# 保证拼音名(XiaoMing)/带数字名(23451qwert)/纯数字名(415411)
 # 这类真人名字永远不会被误拦。
 min-name-randomness: 50
 
@@ -34,12 +42,69 @@ human-ban-message: "§e[风控] 该账号已被限制登录"
 # 白名单玩家(永不拦截)
 whitelist: []
 
-# ---- IP归属地拦截 (v2.2 新增) ----
-# 基于 ip2region 离线库: 首次开启自动下载(~11MB), 之后每 update-days 天
-# 自动更新本地库, 检索全内存完成, 无任何API调用、无限流问题。
-# 一键开关: /atb geo on|off (写回本文件)
+# ---- AI 评分引擎 (v2.3 新增) ----
+# 策略模式 + 可插拔小模型, 四个策略各出 0-95 的"名字随机性"分:
+#   heuristic  规则启发式(v2.0全天日志校准, 稳定兜底)
+#   markov     字符bigram语言模型: 从已验证真人名在线学习"人类命名习惯"
+#   entropy    信息熵/重复度统计特征
+#   logistic   在线逻辑回归: 从实锤bot/验证真人事件自学习权重(持久化 model.json)
+scoring:
+  # ensemble = 四策略加权融合(推荐) / 也可填单个策略名
+  engine: ensemble
+  # 融合权重(ensemble 模式生效): 最终分 = H*wH + M*wM + E*wE + L*wL
+  weights:
+    heuristic: 1.0
+    markov: 0.5
+    entropy: 0.35
+    logistic: 0.6
+  # 在线学习: 实锤bot(正样本)/验证真人(负样本)自动训练 logistic 权重
+  # 并把真人名喂进 markov 语料 —— 服务器画像自进化, 重启不丢(model.json)
+  online-learning: true
+
+# ---- 临时IP封禁 ----
+temp-ip-ban:
+  enabled: true
+  minutes: 120        # 封禁时长, 到期自动解封
+  auto-ban-count: 6   # 同IP窗口内新账号达到N个 -> 自动临时封禁
+  # v2.3: 同IP"已被拦截的机器人"达到N个 -> 更早封IP(实测刷波往往只发2-5只就停)
+  auto-ban-blocked-count: 3
+
+# ---- IP风险追踪 ----
+ip-risk:
+  window-minutes: 10  # 滑动窗口
+  prefix-learn: true  # 学习/16网段信誉(同运营商段bot加分)
+
+# ---- 特征库自动更新 ----
+auto-learn:
+  enabled: true
+  save-interval-minutes: 5    # 自动落盘间隔(原子写入, 重启不丢)
+  decay-days: 30              # N天未命中的特征置信度自动衰减
+  remove-below: 0.12          # 置信度低于该值自动清理
+  seed-from-usercache: true   # 首次启动从 usercache.json 播种已登记玩家(自动过滤随机名)
+
+# ---- 进服后行为哨兵 ----
+sentinel:
+  watch-seconds: 45           # 新账号重点盯防时长
+  instant-register-seconds: 8 # 进服后N秒内发注册命令且参数随机 -> 实锤
+  confirm-auth-attempts: 2    # 盯防期内可疑注册类指令累计N次 -> 实锤
+  # 已登记真人自动信任: 在线满N分钟且未被标记 -> 写入特征库verified名单
+  auto-trust-minutes: 10
+  # 注册/登录类命令表(本服登录插件用哪套就写哪套; 不确定可不填, 用默认表)
+  auth-commands: []
+  # v2.3 泛化: 盯防期内"任意命令+随机参数"也算可疑信号(不限注册命令),
+  # 不绑定特定登录插件 —— 换服务器/换登录插件/模组环境也能自适应
+  any-command-detect: true
+  # v2.3 自适应: 实锤bot用过的命令自动学进本服命令库(下次直接按注册命令对待)
+  auto-learn-auth-commands: true
+
+# ---- 地区拦截(归属地离线库, 零API调用无限流) ----
+# 本地库(ip2region.xdb 约11MB)首次启动自动下载(多镜像), 每7天自动更新,
+# 与 geo.enabled 无关 —— 始终保持就绪, /atb geo on 即开即用。
+# 一键开关: /atb geo on|off (写回本文件); /atb geo status 看库状态
 geo:
   enabled: false
+  # v2.3: 启动即准备本地库(不管开关), 保证 /atb lookup /atb geo on 开箱即用
+  pre-download: true
   # 仅放行中国大陆(内网/保留IP自动豁免)。false 时改用下面的黑/白名单规则
   mainland-only: true
   # 黑名单关键词(命中即拒), mainland-only=false 时生效
@@ -56,12 +121,11 @@ geo:
 
 # ---- 封禁规避防御 (专治重启路由器换IP+换名) ----
 # 【封真人】/atb ban <玩家名> [原因]  -> 四重追踪:
-#   1. 账号名: 该名字任何IP都进不来
+#   1. 账号名: 该名字任何IP都进不来(进服前拒, QQ群无感知)
 #   2. 网段连坐: 重启路由器换的新IP仍在同运营商网段, 未登记玩家一律拒
 #      (已登记真人/白名单不受影响, 不会误伤同网段的真实玩家)
 #   3. 客户端指纹: 换手机热点(不同网段)后, 同一客户端特征命中仍会被踢
 #   4. 逃避计数: 每次逃避尝试自动计数+警报, /atb banlist 一目了然
-# 【封机器人】自动临时IP封禁时联动网段, 随机名重进直接拒。
 ban-evasion:
   enabled: true
   # 封IP时联动封禁的网段范围: 16 = /16运营商段(推荐) / 24 = /24小区段 / off = 关闭(仅封单IP)
@@ -79,29 +143,6 @@ ban-evasion:
   escalate-after: 2          # 第N次封禁起开始加重
   escalate-multiplier: 3     # 加重倍数: 120分钟 -> 360 -> 1080 -> ...
   max-minutes: 10080         # 加重封顶(7天)
-  # 每次逃避被拦, 网段封禁自动顺延 ip-ban 分钟(同样受 max-minutes 封顶)
-
-# ---- IP风险追踪 ----
-ip-risk:
-  window-minutes: 10  # 滑动窗口(新账号数/闪进闪退共用)
-  suspicious-count: 3 # 窗口内第N个新账号起, IP开始加分
-  prefix-learn: true  # 学习/16网段信誉(同运营商段bot加分)
-
-# ---- 特征库自动更新 ----
-auto-learn:
-  enabled: true
-  save-interval-minutes: 5    # 自动落盘间隔(原子写入, 重启不丢)
-  decay-days: 30              # N天未命中的特征置信度自动衰减
-  remove-below: 0.12          # 置信度低于该值自动清理
-  seed-from-usercache: true   # 首次启动从 usercache.json 播种已登记玩家(自动过滤随机名)
-
-# ---- 进服后行为哨兵 ----
-sentinel:
-  watch-seconds: 45           # 新账号重点盯防时长
-  instant-register-seconds: 8 # 进服后N秒内发/e且参数为随机串 -> 直接实锤
-  confirm-auth-attempts: 2    # 盯防期内可疑注册类指令累计N次 -> 实锤
-  # 已登记真人自动信任: 在线满N分钟且未被标记 -> 写入特征库verified名单
-  auto-trust-minutes: 10
 
 # ---- 广告聊天防护 ----
 chat:

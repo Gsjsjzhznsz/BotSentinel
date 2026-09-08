@@ -1,9 +1,9 @@
 name: BotSentinel
-version: 2.2.0
+version: 2.3.0
 main: cn.botsentinel.BotSentinelPlugin
-api-version: '1.21'
+api-version: '1.20'
 folia-supported: true
-description: 无感风控反机器人 - 进服前拦截 + 特征库自更新 + 封禁规避防御 + IP归属地拦截
+description: 无感风控反机器人 - 进服前拦截 + AI策略评分 + 特征库自更新 + 真人封禁追踪 + IP归属地拦截
 author: BotSentinel
 website: https://github.com/Gsjsjzhznsz/BotSentinel
 

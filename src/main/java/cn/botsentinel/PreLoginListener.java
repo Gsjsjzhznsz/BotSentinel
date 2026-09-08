@@ -195,6 +195,13 @@ public class PreLoginListener implements Listener {
             int count = plugin.ipTracker().newNameCount(ip);
             if (plugin.config().ipBanEnabled && count >= plugin.config().autoBanCount) {
                 plugin.banIp(ip, plugin.config().ipBanMinutes, "窗口内新账号达" + count + "个");
+            } else {
+                // v2.3: 同IP连续被拦的机器人达阈值 -> 更早封IP(从日志看刷波往往只发2-5只就停)
+                int blocked = plugin.ipTracker().recordBlockedHit(ip);
+                if (plugin.config().ipBanEnabled && blocked >= plugin.config().autoBanBlockedCount
+                        && plugin.library().getBannedUntil(ip) <= 0) {
+                    plugin.banIp(ip, plugin.config().ipBanMinutes, "窗口内被拦机器人达" + blocked + "个");
+                }
             }
 
             plugin.alert().warn("block",

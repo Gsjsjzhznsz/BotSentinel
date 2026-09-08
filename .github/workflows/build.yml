@@ -1,4 +1,11 @@
-name: Build BotSentinel (Folia/Paper/Spigot)
+name: Build & Release All Platforms
+
+# 一个工作流构建全部平台:
+#   [插件]  main 分支 Maven  ->  BotSentinel-x.y.jar  (Folia/Paper/Spigot/Purpur, MC 1.20-26.2, Java 17-25)
+#   [Fabric] fabric 分支 Gradle -> BotSentinel-fabric.jar (Fabric 服务器 mod)
+#   [Forge]  forge 分支 Gradle -> BotSentinel-forge.jar  (Forge 服务器 mod)
+# 推 tag (v*) 时自动创建 GitHub Release: 三个平台 jar 按排版好的说明一起发布。
+# 手动触发(workflow_dispatch)可指定 mod 端 MC 版本(留空用分支默认 1.21.4)。
 
 on:
   push:
@@ -7,15 +14,21 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      mod_mc_version:
+        description: 'Fabric/Forge 目标 MC 版本(留空=分支默认 1.21.4, 如 1.20.1)'
+        required: false
+        default: ''
 
 jobs:
-  build:
+  build-plugin:
+    name: Plugin (Folia/Paper/Spigot 1.20-26.2)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      - name: Set up JDK 21 (产出 Java 17 字节码, 兼容 Java 17-25)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -27,12 +40,141 @@ jobs:
       - name: Upload plugin jar
         uses: actions/upload-artifact@v4
         with:
-          name: BotSentinel-2.2
+          name: BotSentinel-plugin
           path: target/BotSentinel-*.jar
+          if-no-files-found: error
 
-      - name: Release on tag
-        if: startsWith(github.ref, 'refs/tags/v')
+  build-fabric:
+    name: Mod (Fabric ${{ github.event.inputs.mod_mc_version || '1.21.4' }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fabric branch
+        uses: actions/checkout@v4
+        with:
+          ref: fabric
+          path: fabric
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle 8.14.3 (fabric-loom 1.9 requires <9)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      - name: Override MC version (manual input)
+        if: ${{ github.event.inputs.mod_mc_version != '' }}
+        working-directory: fabric
+        run: |
+          V="${{ github.event.inputs.mod_mc_version }}"
+          sed -i "s/^minecraft_version=.*/minecraft_version=$V/" gradle.properties
+          echo "已切换 MC 版本: $V (注意 yarn_mappings/fabric_version 也需匹配该版本, 否则构建失败)"
+
+      - name: Build Fabric mod
+        working-directory: fabric
+        run: gradle build --no-daemon
+
+      - name: Upload fabric jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: BotSentinel-fabric
+          path: fabric/build/libs/*.jar
+          if-no-files-found: error
+
+  build-forge:
+    name: Mod (Forge ${{ github.event.inputs.mod_mc_version || '1.21.4' }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout forge branch
+        uses: actions/checkout@v4
+        with:
+          ref: forge
+          path: forge
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle 8.10.2 (ForgeGradle 6 requires <9)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Override MC version (manual input)
+        if: ${{ github.event.inputs.mod_mc_version != '' }}
+        working-directory: forge
+        run: |
+          V="${{ github.event.inputs.mod_mc_version }}"
+          sed -i "s/^minecraft_version=.*/minecraft_version=$V/" gradle.properties
+          echo "已切换 MC 版本: $V (注意 forge 版本号也需匹配, 否则构建失败)"
+
+      - name: Build Forge mod
+        working-directory: forge
+        run: gradle build --no-daemon
+
+      - name: Upload forge jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: BotSentinel-forge
+          path: forge/build/libs/*.jar
+          if-no-files-found: error
+
+  release:
+    name: Release (tag v*)
+    needs: [ build-plugin, build-fabric, build-forge ]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Organize release files
+        run: |
+          mkdir -p release
+          find dist -name "*.jar" ! -name "*-sources.jar" ! -name "*original*" -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Create formatted release
         uses: softprops/action-gh-release@v2
         with:
-          files: target/BotSentinel-*.jar
+          files: release/*.jar
           generate_release_notes: true
+          body: |
+            # BotSentinel ${{ github.ref_name }}
+
+            > 无感风控反机器人 · 进服前拦截(QQ群零感知) · AI策略评分 · 特征库自动进化 · 真人封禁四重追踪 · IP归属地拦截
+
+            ## 📦 按你的服务端选择下载
+
+            | 平台 | 文件 | 适用 |
+            |------|------|------|
+            | **Folia / Lophine / Luminol / Paper / Purpur / Spigot** | `BotSentinel-2.3.jar` | 插件, MC 1.20 ~ 26.2, Java 17-25 |
+            | **Fabric** | `BotSentinel-*-fabric*.jar` | Fabric 服务端 mod, MC 1.21.4 |
+            | **Forge** | `BotSentinel-*-forge*.jar` | Forge 服务端 mod, MC 1.21.4 |
+
+            ## 🚀 安装
+
+            **插件端**: 丢进 `plugins/` 重启即可。旧版本配置文件**自动迁移**(自动备份+补新键, 你的设置不会丢)。
+
+            **mod 端**: 丢进 `mods/` 重启。
+
+            ## ✨ 本版亮点
+
+            - **AI 策略评分引擎**: 规则启发式 + bigram 语言模型 + 信息熵 + 在线逻辑回归, 加权融合; 真人零误伤保险丝保持数学不变
+            - **IP 归属地库修复**: 不管开关与否, 启动即自动下载/更新本地库(多镜像), `/atb geo on` 即开即用
+            - **配置自动迁移**: v2.0~v2.2 旧配置升级自动备份, 用户设置 100% 保留
+            - **登录命令自适应**: 不再绑定特定登录插件, 任意服务器环境自动学习本服注册命令
+            - **Java 17-25 / MC 1.20-26.2**: 一个 jar 全版本通吃
+
+            ## 🛠 管理
+
+            `/atb help` 查看全部命令 · `/atb stats` 风控总览 · `/atb engine <名>` AI评分明细 · `/atb geo status` 归属地库状态

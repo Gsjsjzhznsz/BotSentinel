@@ -99,7 +99,7 @@ public class LibraryStore {
     }
 
     public static class Data {
-        public int version = 3;
+        public int version = 4;
         public Map<String, Entry> botNames = new ConcurrentHashMap<>();
         public Map<String, Entry> usernameShapes = new ConcurrentHashMap<>();
         public Map<String, SigEntry> adSignatures = new ConcurrentHashMap<>();
@@ -109,6 +109,8 @@ public class LibraryStore {
         public Map<String, SubnetBan> subnetBans = new ConcurrentHashMap<>();
         public Map<String, Fingerprint> fingerprints = new ConcurrentHashMap<>();
         public Map<String, HumanBan> humanBans = new ConcurrentHashMap<>();
+        /** v2.3: 实锤bot用过的根命令(本服自适应登录/注册命令库, 跨服通用) */
+        public Map<String, Entry> learnedAuthCommands = new ConcurrentHashMap<>();
         public long lastSaved = 0;
     }
 
@@ -156,6 +158,7 @@ public class LibraryStore {
                     if (d.subnetBans != null) data.subnetBans = d.subnetBans;
                     if (d.fingerprints != null) data.fingerprints = d.fingerprints;
                     if (d.humanBans != null) data.humanBans = d.humanBans;
+                    if (d.learnedAuthCommands != null) data.learnedAuthCommands = d.learnedAuthCommands;
                 }
             }
         } catch (Exception ignored) {
@@ -603,6 +606,47 @@ public class LibraryStore {
         long now = now();
         for (IpEntry e : data.botIps.values()) if (e.bannedUntil > now) n++;
         return n;
+    }
+
+    // ---------- 本服命令自适应学习 (v2.3: 跨服务器通用) ----------
+
+    /** 实锤bot用过的根命令 -> 学进本服命令库(之后按注册类命令对待) */
+    public void learnAuthCommand(String root, String note) {
+        if (root == null || root.isEmpty() || root.length() > 24) return;
+        String k = lc(root);
+        Entry e = data.learnedAuthCommands.get(k);
+        if (e == null) {
+            data.learnedAuthCommands.put(k, new Entry(0.8, note == null ? "实锤bot自动学习" : note));
+        } else {
+            e.confidence = Math.min(0.99, e.confidence + 0.05);
+            e.hits++;
+            e.lastSeen = now();
+            if (note != null && !note.isEmpty()) e.note = note;
+        }
+        dirty.set(true);
+    }
+
+    public boolean isLearnedAuthCommand(String root) {
+        if (root == null) return false;
+        Entry e = data.learnedAuthCommands.get(lc(root));
+        return e != null && e.confidence >= 0.5;
+    }
+
+    public boolean removeLearnedAuthCommand(String root) {
+        boolean removed = data.learnedAuthCommands.remove(lc(root)) != null;
+        if (removed) dirty.set(true);
+        return removed;
+    }
+
+    public int learnedAuthCommandCount() { return data.learnedAuthCommands.size(); }
+
+    public List<String> learnedAuthCommands(int limit) {
+        List<String> out = new ArrayList<>();
+        for (Map.Entry<String, Entry> en : data.learnedAuthCommands.entrySet()) {
+            out.add(en.getKey() + "(命中" + en.getValue().hits + ")");
+            if (out.size() >= limit) break;
+        }
+        return out;
     }
 
     // ---------- 手动修正: 移除 / 撤销 / 历史 (v2.2) ----------

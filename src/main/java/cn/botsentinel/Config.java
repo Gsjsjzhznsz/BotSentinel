@@ -29,6 +29,7 @@ public class Config {
     public boolean ipBanEnabled = true;
     public int ipBanMinutes = 120;
     public int autoBanCount = 6;
+    public int autoBanBlockedCount = 3;   // v2.3: 同IP被拦机器人达N次(窗口内) -> 直接封IP(比新账号阈值更快)
 
     public int windowMinutes = 10;
     public boolean prefixLearn = true;
@@ -44,6 +45,8 @@ public class Config {
     public int confirmAuthAttempts = 2;
     public int autoTrustMinutes = 10;
     public List<String> authCommands;
+    public boolean anyCommandDetect = true;   // v2.3: 任意首命令+随机参数也算可疑信号(不再限定命令表)
+    public boolean autoLearnAuthCommands = true; // v2.3: 实锤bot用过的命令自动学进本服命令库
 
     public boolean genericDomainHeuristic = true;
     public boolean protectKnownPlayers = true;
@@ -70,6 +73,15 @@ public class Config {
     public List<String> geoAllowIps = new java.util.ArrayList<>();
     public int geoUpdateDays = 7;
     public String geoDenyMessage;
+    public boolean geoPreDownload = true;  // v2.3: 不管开关, 启动就准备本地库(开关只控制拦截判定)
+
+    // 评分引擎(v2.3): 策略模式 + AI 小模型
+    public String scoringEngine = "ensemble";   // ensemble|heuristic|markov|entropy|logistic
+    public double scoringWHeuristic = 1.0;
+    public double scoringWMarkov = 0.5;
+    public double scoringWEntropy = 0.35;
+    public double scoringWLogistic = 0.6;
+    public boolean scoringOnlineLearn = true;   // 实锤/验证事件自动训练小模型
 
     public Config(BotSentinelPlugin plugin) {
         this.plugin = plugin;
@@ -78,8 +90,11 @@ public class Config {
 
     public void reload() {
         File f = new File(plugin.getDataFolder(), "config.yml");
+        // v2.3: 旧配置自动迁移(保留用户值, 补新键, 自动备份) —— 以后更新永不再手改配置
+        String migrateMsg = ConfigMigrator.migrateIfNeeded(f, () -> plugin.getResource("config.yml"));
         if (!f.exists()) plugin.saveDefaultConfig();
         yaml = YamlConfiguration.loadConfiguration(f);
+        if (migrateMsg != null) plugin.getLogger().info("[配置] " + migrateMsg);
 
         String m = yaml.getString("mode", "block");
         if ("observe".equalsIgnoreCase(m)) mode = Mode.OBSERVE;
@@ -99,6 +114,7 @@ public class Config {
         ipBanEnabled = yaml.getBoolean("temp-ip-ban.enabled", true);
         ipBanMinutes = clamp(yaml.getInt("temp-ip-ban.minutes", 120), 1, 10080);
         autoBanCount = clamp(yaml.getInt("temp-ip-ban.auto-ban-count", 6), 2, 100);
+        autoBanBlockedCount = clamp(yaml.getInt("temp-ip-ban.auto-ban-blocked-count", 3), 2, 50);
 
         windowMinutes = clamp(yaml.getInt("ip-risk.window-minutes", 10), 1, 120);
         prefixLearn = yaml.getBoolean("ip-risk.prefix-learn", true);
@@ -115,8 +131,14 @@ public class Config {
         autoTrustMinutes = clamp(yaml.getInt("sentinel.auto-trust-minutes", 10), 1, 180);
         authCommands = yaml.getStringList("sentinel.auth-commands");
         if (authCommands.isEmpty()) {
-            authCommands = java.util.Arrays.asList("e", "l", "li", "log", "login", "reg", "regi", "regis", "register");
+            // 通用默认表: 覆盖 AuthMe/CatSeedLogin/NyESSLogin/自定义登录插件常见命令
+            authCommands = java.util.Arrays.asList(
+                    "e", "l", "li", "log", "login", "reg", "regi", "regis", "register",
+                    "registerplus", "changepw", "changepassword", "password", "unlogin",
+                    "reglog", "loginplus", "authme", "cdkey", "yanzheng");
         }
+        anyCommandDetect = yaml.getBoolean("sentinel.any-command-detect", true);
+        autoLearnAuthCommands = yaml.getBoolean("sentinel.auto-learn-auth-commands", true);
 
         genericDomainHeuristic = yaml.getBoolean("chat.generic-domain-heuristic", true);
         protectKnownPlayers = yaml.getBoolean("chat.protect-known-players", true);
@@ -147,6 +169,15 @@ public class Config {
         geoUpdateDays = clamp(yaml.getInt("geo.update-days", 7), 1, 365);
         geoDenyMessage = color(yaml.getString("geo.denied-message",
                 "§e[风控] 当前地区暂未开放加入本服务器"));
+        geoPreDownload = yaml.getBoolean("geo.pre-download", true);
+
+        // 评分引擎(v2.3)
+        scoringEngine = yaml.getString("scoring.engine", "ensemble");
+        scoringWHeuristic = yaml.getDouble("scoring.weights.heuristic", 1.0);
+        scoringWMarkov = yaml.getDouble("scoring.weights.markov", 0.5);
+        scoringWEntropy = yaml.getDouble("scoring.weights.entropy", 0.35);
+        scoringWLogistic = yaml.getDouble("scoring.weights.logistic", 0.6);
+        scoringOnlineLearn = yaml.getBoolean("scoring.online-learning", true);
     }
 
     /** geo 开关持久化(/atb geo on|off 用) */

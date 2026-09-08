@@ -44,6 +44,9 @@ public class GeoRegionManager {
         public String rule = "";     // 命中的规则说明
     }
 
+    /** 库状态(v2.3: /atb geo status 直观展示, 修复"库没下载"黑箱) */
+    public enum State { NOT_DOWNLOADED, DOWNLOADING, READY, FAILED }
+
     private final Path dbFile;
     private final Consumer<String> infoLog;
     private final Consumer<String> warnLog;
@@ -58,6 +61,8 @@ public class GeoRegionManager {
     private volatile int updateDays = 7;
     private volatile long lastUpdateCheck = 0;
     private volatile long lastDownloadAttempt = 0;
+    private volatile State state = State.NOT_DOWNLOADED;
+    private volatile String lastError = "";
 
     public GeoRegionManager(Path dbFile, Consumer<String> infoLog, Consumer<String> warnLog) {
         this.dbFile = dbFile;
@@ -77,7 +82,9 @@ public class GeoRegionManager {
     }
 
     public boolean isEnabled() { return enabled; }
-    public boolean isReady() { return searcher != null; }
+    public boolean isReady() { return state == State.READY; }
+    public State state() { return state; }
+    public String lastError() { return lastError; }
     public long dbSize() { try { return Files.size(dbFile); } catch (Exception e) { return 0; } }
     public long dbAgeMs() {
         try { return System.currentTimeMillis() - Files.getLastModifiedTime(dbFile).toMillis(); }
@@ -92,28 +99,44 @@ public class GeoRegionManager {
     }
 
     // ---------- 生命周期 ----------
-    /** 启动时调用(异步线程): 库缺失则下载, 然后加载 */
+    /**
+     * 启动时调用(异步线程): v2.3 修复 —— 不管 geo 开关与否都准备本地库。
+     * 这样 /atb geo on 立即可用, /atb lookup 开箱即用。
+     * 开关只控制"拦截判定", 不再控制"库下载"。
+     */
     public void initAsync() {
-        if (!enabled) return;
-        if (Files.exists(dbFile)) { loadFromFile(); checkUpdate(true); return; }
-        downloadAndLoadAsync("首次下载归属地库");
+        if (Files.exists(dbFile)) {
+            loadFromFile();
+            if (isReady()) { checkUpdate(true); return; }
+            // 本地文件损坏: 走重新下载
+        }
+        downloadAndLoadAsync(Files.exists(dbFile) ? "本地库损坏, 重新下载" : "首次下载归属地库");
     }
 
-    /** 定时调用(异步线程): 库文件超过 updateDays 天则自动更新 */
+    /** 定时调用(异步线程): 库文件超过 updateDays 天则自动更新; 失败自动重试(不再要求 enabled) */
     public void checkUpdate(boolean force) {
-        if (!enabled) return;
         long now = System.currentTimeMillis();
         if (!force && now - lastUpdateCheck < 1800_000L) return; // 半小时内只查一次
         lastUpdateCheck = now;
+        if (state == State.DOWNLOADING) return;
         long age = dbAgeMs();
-        if (age < (long) updateDays * 86400000L) return;
+        if (age != Long.MAX_VALUE && age < (long) updateDays * 86400000L) return;
         if (now - lastDownloadAttempt < 600_000L) return; // 下载失败10分钟内不重试
-        downloadAndLoadAsync("归属地库自动更新(" + dbAgeDays() + "天前)");
+        downloadAndLoadAsync(age == Long.MAX_VALUE ? "归属地库缺失, 自动补下载"
+                : "归属地库自动更新(" + dbAgeDays() + "天前)");
+    }
+
+    /** 手动立即下载(/atb geo download), 返回 false=已在下载中 */
+    public boolean downloadNow() {
+        if (state == State.DOWNLOADING) return false;
+        downloadAndLoadAsync("手动触发下载");
+        return true;
     }
 
     private void downloadAndLoadAsync(String why) {
         lastDownloadAttempt = System.currentTimeMillis();
-        infoLog.accept("[地区库] " + why + " 开始下载 ip2region.xdb ...");
+        state = State.DOWNLOADING;
+        infoLog.accept("[地区库] " + why + " 开始下载 ip2region.xdb (约11MB, 多镜像自动切换) ...");
         Thread t = new Thread(() -> {
             Path tmp = dbFile.resolveSibling("ip2region.xdb.downloading");
             for (String mirror : DEFAULT_MIRRORS) {
@@ -131,11 +154,13 @@ public class GeoRegionManager {
                     infoLog.accept("[地区库] 下载并加载成功: " + (dbSize() / 1024 / 1024) + "MB, 来源: " + mirror);
                     return;
                 } catch (Exception e) {
-                    warnLog.accept("[地区库] 镜像失败 " + mirror + " : " + e.getMessage());
+                    lastError = mirror + " : " + e.getMessage();
+                    warnLog.accept("[地区库] 镜像失败 " + lastError);
                 }
             }
             try { Files.deleteIfExists(tmp); } catch (Exception ignored) {}
-            warnLog.accept("[地区库] 全部镜像下载失败, 地区拦截暂不生效(下一轮定时重试; 已有旧库不受影响)");
+            state = State.FAILED;
+            warnLog.accept("[地区库] 全部镜像下载失败(" + lastError + "), 10分钟后自动重试; /atb geo download 可手动重试");
         }, "BotSentinel-GeoDownload");
         t.setDaemon(true);
         t.start();
@@ -154,8 +179,12 @@ public class GeoRegionManager {
             Searcher s = Searcher.newWithBuffer(cBuff);
             s.search("223.5.5.5"); // 热身+自检
             synchronized (searchLock) { this.searcher = s; }
+            state = State.READY;
+            lastError = "";
             infoLog.accept("[地区库] ip2region 本地库加载完成 (" + (dbSize() / 1024 / 1024) + "MB, 库龄" + dbAgeDays() + "天)");
         } catch (Exception e) {
+            lastError = e.getMessage();
+            state = State.FAILED;
             warnLog.accept("[地区库] 本地库加载失败: " + e.getMessage());
         }
     }

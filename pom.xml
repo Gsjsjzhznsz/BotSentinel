@@ -6,14 +6,14 @@
 
     <groupId>cn.botsentinel</groupId>
     <artifactId>botsentinel</artifactId>
-    <version>2.2.0</version>
+    <version>2.3.0</version>
     <packaging>jar</packaging>
 
     <name>BotSentinel</name>
-    <description>无感风控反机器人 - 进服前拦截 + 自动更新特征库 + 封禁规避防御 + IP归属地拦截 (Folia/Lophine 兼容)</description>
+    <description>无感风控反机器人 - 进服前拦截 + AI策略评分 + 特征库自更新 + 真人封禁追踪 + IP归属地拦截 (MC 1.20-26.2 / Java 17-25 / Folia+Paper+Spigot)</description>
 
     <properties>
-        <maven.compiler.release>21</maven.compiler.release>
+        <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -28,7 +28,7 @@
         <dependency>
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
-            <version>1.21.4-R0.1-SNAPSHOT</version>
+            <version>1.20.1-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
@@ -46,7 +46,7 @@
     </dependencies>
 
     <build>
-        <finalName>BotSentinel-2.2</finalName>
+        <finalName>BotSentinel-2.3</finalName>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

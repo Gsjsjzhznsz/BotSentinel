@@ -52,6 +52,7 @@ public class AtbCommand implements CommandExecutor, TabCompleter {
             case "evasion": case "bans": evasion(sender); return true;
             case "geo": geo(sender, args); return true;
             case "lookup": lookup(sender, args); return true;
+            case "engine": engine(sender, args); return true;
             case "unlearn": unlearn(sender, args); return true;
             case "undo": undo(sender, args); return true;
             case "history": history(sender, args); return true;
@@ -73,14 +74,18 @@ public class AtbCommand implements CommandExecutor, TabCompleter {
     // ---------- 帮助 ----------
     private void help(CommandSender s) {
         s.sendMessage("§8§m                                                  ");
-        s.sendMessage(" §b§lBotSentinel v2.2 §8| §7无感风控 · 反机器人 · 地区拦截");
+        s.sendMessage(" §b§lBotSentinel v2.3 §8| §7无感风控 · 反机器人 · 地区拦截 · AI评分");
         s.sendMessage("§8§m                                                  ");
         s.sendMessage(P + "§e—— 状态 ——");
         s.sendMessage(P + "/atb stats §f- 风控总览 §8| §f/atb check <名> §f- 评分细节");
         s.sendMessage(P + "/atb lookup <IP> §f- 查IP归属地 §8| §f/atb mode <block|observe>");
-        s.sendMessage(P + "§e—— 地区拦截 (v2.2) ——");
+        s.sendMessage(P + "§e—— AI 评分引擎 (v2.3) ——");
+        s.sendMessage(P + "/atb engine <名字> §f- 各策略评分明细(规则/语言模型/熵/回归)");
+        s.sendMessage(P + "/atb engine info §f- 引擎状态/权重/训练量 §8| §f重载改 config.yml [scoring]");
+        s.sendMessage(P + "§e—— 地区拦截 ——");
         s.sendMessage(P + "/atb geo on|off §f- 一键开关(仅放行大陆, 配置可细化)");
         s.sendMessage(P + "/atb geo status §f- 库状态/规则/拦截量 §8| §f/atb geo test <IP>");
+        s.sendMessage(P + "/atb geo download §f- 手动重新下载本地归属地库");
         s.sendMessage(P + "§e—— 封真人 (换IP/换名/换网络都进不来) ——");
         s.sendMessage(P + "/atb ban <玩家名> [原因] §f- 四重追踪封禁");
         s.sendMessage(P + "/atb pardon <玩家名> §f- 解封 §8| §f/atb banlist §f- 封禁与逃避记录");
@@ -90,7 +95,7 @@ public class AtbCommand implements CommandExecutor, TabCompleter {
         s.sendMessage(P + "§e—— 特征库 (加错了随时撤销) ——");
         s.sendMessage(P + "/atb learn <名|IP> [原因] §8| §f/atb learnmsg <广告原文>");
         s.sendMessage(P + "/atb trust <玩家名> §f- 加入真人名单");
-        s.sendMessage(P + "/atb unlearn <name|shape|sig|ip|prefix|trust> <值> §f- 移除特征");
+        s.sendMessage(P + "/atb unlearn <name|shape|sig|ip|prefix|trust|cmd> <值> §f- 移除特征");
         s.sendMessage(P + "/atb undo [条数] §f- 撤销最近添加 §8| §f/atb history §f- 最近改动");
         s.sendMessage(P + "/atb library §f- 库概览 §8| §f/atb reload §f- 重载配置");
         s.sendMessage("§8§m                                                  ");
@@ -100,7 +105,7 @@ public class AtbCommand implements CommandExecutor, TabCompleter {
     private void stats(CommandSender s) {
         StatsStore st = plugin.stats();
         LibraryStore lib = plugin.library();
-        s.sendMessage("§6===== BotSentinel v2.2 风控总览 =====");
+        s.sendMessage("§6===== BotSentinel v2.3 风控总览 =====");
         s.sendMessage("§7运行: §f" + st.uptimeText() + " §8| §7模式: §f" + modeText()
                 + " §8| §7内核: §f" + FoliaBridge.kernelName());
         s.sendMessage("§7拦截进服: §f" + st.d.blockedPreLogin
@@ -128,6 +133,36 @@ public class AtbCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    // ---------- AI 评分引擎 (v2.3) ----------
+    private void engine(CommandSender s, String[] args) {
+        if (args.length < 2 || args[1].equalsIgnoreCase("info")) {
+            var m = plugin.scoreEngine().statsMap();
+            s.sendMessage("§6===== AI 评分引擎 =====");
+            s.sendMessage(P + "引擎: §e" + m.get("engine") + " §8| §7权重: §f" + m.get("weights"));
+            s.sendMessage(P + "Markov语料: §f" + m.get("markovCorpus") + " §8| §7回归训练样本: §f" + m.get("logisticSamples"));
+            s.sendMessage(P + "策略: §fheuristic§7(规则) §fmarkov§7(语言模型) §fentropy§7(熵) §flogistic§7(在线回归)");
+            s.sendMessage(P + "§8明细: /atb engine <名字> §8| §7切引擎/权重: config.yml [scoring] 段 + /atb reload");
+            return;
+        }
+        String name = args[1];
+        ScoreEngine eng = plugin.scoreEngine();
+        ScoreEngine.NameFeatures f = eng.features(name);
+        int[] b = eng.breakdown(name, f); // [规则,语言模型,熵,回归,模型加分,保险丝,总分]
+        s.sendMessage(P + "名字: §e" + name + " §8| §7形态: §f" + LibraryStore.shapeOf(name));
+        s.sendMessage(P + "策略分: 规则§f" + b[0] + " §8| §7语言模型§f" + b[1]
+                + " §8| §7熵§f" + b[2] + " §8| §7回归§f" + b[3]);
+        s.sendMessage(P + "保险丝: §e" + b[5] + " §8(§7决定能否参与拦截§8) §8| §7模型加分: §f+" + b[4]
+                + " §8| §7→§b总分: §e" + b[6]);
+        s.sendMessage(P + "特征: 熵§f" + String.format(Locale.ROOT, "%.2f", f.entropy)
+                + " §7元音比§f" + String.format(Locale.ROOT, "%.2f", f.vowelRatio)
+                + " §7大写岛§f" + f.upperIslands
+                + " §7最长辅音§f" + f.maxConsonantRun
+                + " §7bigramLogP§f" + String.format(Locale.ROOT, "%.2f", f.markovLogP)
+                + (f.hasCommonWord ? " §a含常见词" : ""));
+        s.sendMessage(P + "§8保险丝: 最终随机性≥" + plugin.config().minNameRandomness
+                + "才会参与拦截判定, 拼音/数字名永不误拦");
+    }
+
     // ---------- 地区拦截 ----------
     private void geo(CommandSender s, String[] args) {
         GeoRegionManager g = plugin.geo();
@@ -143,21 +178,39 @@ public class AtbCommand implements CommandExecutor, TabCompleter {
                 plugin.config().setGeoEnabled(true);
                 FoliaBridge.runAsync(plugin, () -> plugin.geo().initAsync());
                 s.sendMessage(P + "地区拦截已 §a开启 §7(默认仅放行中国大陆, 内网IP自动豁免)");
+                if (!plugin.geo().isReady()) {
+                    s.sendMessage(P + "§e本地库未就绪, 正在后台准备(首次约11MB, 详见控制台)...");
+                }
                 s.sendMessage(P + "§8豁免: 已登记真人/白名单/geo.allow-ips; 细则在 config.yml [geo] 段");
             }
             case "off" -> {
                 plugin.config().setGeoEnabled(false);
                 s.sendMessage(P + "地区拦截已 §c关闭");
             }
+            case "download" -> {
+                boolean started = plugin.geo().downloadNow();
+                if (started) s.sendMessage(P + "已开始重新下载归属地库(多镜像自动切换), 结果见控制台日志");
+                else s.sendMessage(P + "§e已在下载中, 请稍候(结果见控制台日志)");
+            }
             case "status" -> {
                 s.sendMessage("§6===== 地区拦截状态 =====");
                 s.sendMessage("§7开关: " + (plugin.config().geoEnabled ? "§a开" : "§c关")
                         + " §8| §7模式: " + (plugin.config().geoMainlandOnly ? "仅放行大陆" : "黑/白名单"));
-                s.sendMessage("§7本地库: " + (g.isReady() ? "§a就绪 §f" + (g.dbSize() / 1024 / 1024) + "MB"
-                        : "§e未就绪(首次自动下载中, 或看日志排查镜像)"));
+                String st2 = switch (g.state()) {
+                    case NOT_DOWNLOADED -> "§7未下载";
+                    case DOWNLOADING -> "§e下载中...";
+                    case READY -> "§a就绪";
+                    case FAILED -> "§c失败(自动重试中)";
+                };
+                s.sendMessage("§7本地库: " + st2
+                        + (g.isReady() ? " §f" + (g.dbSize() / 1024 / 1024) + "MB" : ""));
+                if (g.state() == GeoRegionManager.State.FAILED && !g.lastError().isEmpty()) {
+                    s.sendMessage("§7失败原因: §c" + g.lastError());
+                }
                 s.sendMessage("§7库龄: §f" + (g.dbAgeDays() < 0 ? "无" : g.dbAgeDays() + "天")
-                        + " §8(§f每" + plugin.config().geoUpdateDays + "天自动更新§8)"
-                        + " §8| §7累计拦截: §f" + plugin.stats().d.geoBlocked);
+                        + " §8(§f每" + plugin.config().geoUpdateDays + "天自动更新§8)");
+                s.sendMessage("§7累计拦截: §f" + plugin.stats().d.geoBlocked
+                        + " §8| §7手动重下: §f/atb geo download");
                 if (!plugin.config().geoBlockedRegions.isEmpty())
                     s.sendMessage("§7黑名单关键词: §f" + String.join(", ", plugin.config().geoBlockedRegions));
                 if (!plugin.config().geoAllowedRegions.isEmpty())
@@ -306,6 +359,7 @@ public class AtbCommand implements CommandExecutor, TabCompleter {
             return;
         }
         plugin.library().addTrustedManual(args[1], "管理员手动信任");
+        plugin.scoreEngine().learnHuman(args[1]); // v2.3: 小模型负样本训练
         s.sendMessage(P + "已将 §e" + args[1] + " §7加入已登记真人名单");
     }
 
@@ -314,12 +368,13 @@ public class AtbCommand implements CommandExecutor, TabCompleter {
             s.sendMessage(P + "§c用法: /atb unlearn <类型> <值>");
             s.sendMessage(P + "§7类型: §ename§f 假人名 §8| §eshape§f 形态(填玩家名即可) §8| §esig§f 广告签名");
             s.sendMessage(P + "§8      §eip§f 风险IP §8| §eprefix§f 风险网段 §8| §etrust§f 取消真人信任");
+            s.sendMessage(P + "§8      §ecmd§f 移除自适应学习的本服命令");
             s.sendMessage(P + "§7示例: /atb unlearn name Ciloat77422");
             s.sendMessage(P + "§8提示: /atb undo 可直接撤销最近一次添加");
             return;
         }
         String type = args[1].toLowerCase(Locale.ROOT);
-        String value = args[2];
+        String value = args.length >= 3 ? args[2] : "";
         boolean ok;
         switch (type) {
             case "name", "botname" -> ok = plugin.library().removeBotName(value);
@@ -328,6 +383,7 @@ public class AtbCommand implements CommandExecutor, TabCompleter {
             case "ip" -> ok = plugin.library().removeBotIp(value);
             case "prefix" -> ok = plugin.library().removeIpPrefix(value);
             case "trust", "player" -> ok = plugin.library().removeTrusted(value);
+            case "cmd", "command", "authcmd" -> ok = plugin.library().removeLearnedAuthCommand(value);
             default -> { s.sendMessage(P + "§c未知类型: " + type + " §8(name/shape/sig/ip/prefix/trust)"); return; }
         }
         if (ok) s.sendMessage(P + "已移除 §e" + type + " §7: §f" + value + " §8(§7可用 /atb undo 恢复§8)");
@@ -503,15 +559,16 @@ public class AtbCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
         String a0 = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
         if (args.length == 1) {
-            return filter(Arrays.asList("stats", "mode", "geo", "lookup", "ban", "pardon", "banlist",
+            return filter(Arrays.asList("stats", "mode", "geo", "lookup", "engine", "ban", "pardon", "banlist",
                     "banip", "unbanip", "evasion", "learn", "learnmsg", "trust", "unlearn", "undo",
                     "history", "check", "library", "reload", "help"), a0);
         }
         if (args.length == 2) {
             switch (a0) {
                 case "mode": return filter(Arrays.asList("block", "observe"), args[1]);
-                case "geo": return filter(Arrays.asList("on", "off", "status", "test"), args[1]);
-                case "unlearn": return filter(Arrays.asList("name", "shape", "sig", "ip", "prefix", "trust"), args[1]);
+                case "geo": return filter(Arrays.asList("on", "off", "status", "test", "download"), args[1]);
+                case "engine": return filter(Arrays.asList("info"), args[1]);
+                case "unlearn": return filter(Arrays.asList("name", "shape", "sig", "ip", "prefix", "trust", "cmd"), args[1]);
                 case "learn", "trust", "check", "pardon":
                     return filter(onlineNames(), args[1]);
                 case "undo", "history": return Arrays.asList("5", "10");

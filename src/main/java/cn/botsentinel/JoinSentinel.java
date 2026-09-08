@@ -33,6 +33,8 @@ public class JoinSentinel implements Listener {
         volatile int authAttempts;
         volatile boolean confirmed;
         volatile boolean flagged;
+        volatile String lastRoot = "";      // 最近用过的根命令(v2.3 自适应学习用)
+        volatile boolean lastRandomArgs;    // 最近命令参数是否随机串
     }
 
     private final BotSentinelPlugin plugin;
@@ -112,10 +114,14 @@ public class JoinSentinel implements Listener {
         int colon = root.indexOf(':');
         if (colon >= 0) root = root.substring(colon + 1);
 
-        if (!plugin.config().authCommands.contains(root)) return;
-
         // 已验证真人: 正常注册/登录, 不统计
         if (plugin.library().isVerifiedPlayer(p.getName()) || plugin.isWhitelisted(p.getName())) return;
+
+        // v2.3 泛化: 命令表(可配置) + 本服自适应学习库 + (可选)任意命令检测
+        //   —— 不再绑定特定服务器的注册命令, 移植到别的服务器也能自适应
+        boolean authListed = plugin.config().authCommands.contains(root)
+                || plugin.library().isLearnedAuthCommand(root);
+        if (!authListed && !plugin.config().anyCommandDetect) return;
 
         long sinceJoin = System.currentTimeMillis() - t.joinTs;
         String ip = p.getAddress() == null ? "" : p.getAddress().getAddress().getHostAddress();
@@ -126,8 +132,6 @@ public class JoinSentinel implements Listener {
         // 可疑门槛: 观察名单 / 名字随机 / 同IP新账号多 —— 正常名字玩家不会进入本分支
         boolean suspicious = session >= 35 || randomness >= 35 || ipCount >= 2 || ipRisk(ip);
         if (!suspicious) return;
-
-        t.flagged = true;
 
         // 参数随机串判定: 两个相同参数(注册确认式) 或 单个无元音长参数
         boolean randomArgs = false;
@@ -144,14 +148,27 @@ public class JoinSentinel implements Listener {
                 if (vowels * 4 < a1.length()) randomArgs = true; // 元音占比<25%
             }
         }
+        t.lastRoot = root;
+        t.lastRandomArgs = randomArgs;
 
-        // A: 秒注册实锤(当日漏网bot全部在1秒内发/e, 两参数相同)
+        // A: 秒发命令实锤(命令在注册类表内=强信号; 任意命令+随机参数=弱信号)
         if (randomArgs && sinceJoin <= plugin.config().instantRegisterSeconds * 1000L
                 && (randomness >= 50 || session >= 45 || ipCount >= 2)) {
-            confirmBot(p, "秒发注册指令(" + (sinceJoin / 1000) + "秒内, 参数随机串)");
-            event.setCancelled(true);
+            if (authListed) {
+                confirmBot(p, "秒发注册指令(" + (sinceJoin / 1000) + "秒内, 参数随机串)");
+                event.setCancelled(true);
+                return;
+            }
+            // 任意命令(非注册类): 降级为计数信号, 连续两次才实锤(防误伤真人在首秒发其他命令)
+            t.authAttempts += 1;
+            if (t.authAttempts >= plugin.config().confirmAuthAttempts + 1
+                    && sinceJoin <= plugin.config().watchSeconds * 1000L) {
+                confirmBot(p, "盯防期内连续可疑命令" + t.authAttempts + "次(参数随机串)");
+            }
             return;
         }
+
+        if (!authListed) return; // 非注册类命令且未达随机参数条件: 只记录不计数
 
         // B: 盯防期内累计注册尝试
         t.authAttempts++;
@@ -189,15 +206,14 @@ public class JoinSentinel implements Listener {
         String name = p.getName();
         String ip = ipOf(p);
         Track t = tracks.remove(key(name));
-        if (t != null) {
-            if (!t.confirmed) {
-                int minutes = (int) ((System.currentTimeMillis() - t.joinTs) / 60000L);
-                if (!t.flagged && minutes >= plugin.config().autoTrustMinutes) {
-                    // 自动信任: 真人名单自动成长(特征库自动更新的一部分)
-                    plugin.library().addKnownPlayer(name, true, "自动信任:在线" + minutes + "分钟无异常");
-                }
-                if (minutes > 0) plugin.library().addPlayMinutes(name, minutes);
+        if (t != null && !t.confirmed) {
+            int minutes = (int) ((System.currentTimeMillis() - t.joinTs) / 60000L);
+            if (!t.flagged && minutes >= plugin.config().autoTrustMinutes) {
+                // 自动信任: 真人名单自动成长(特征库自动更新的一部分) + 小模型在线学习
+                plugin.library().addKnownPlayer(name, true, "自动信任:在线" + minutes + "分钟无异常");
+                plugin.scoreEngine().learnHuman(name);
             }
+            if (minutes > 0) plugin.library().addPlayMinutes(name, minutes);
         }
 
         // v2.2 闪进闪退检测: 停留<20秒即断(日志实锤 Ciloat77422 模式)
@@ -266,6 +282,16 @@ public class JoinSentinel implements Listener {
             plugin.library().recordBotIp(ip, 0.35, reason);
             if (plugin.config().prefixLearn) plugin.library().recordIpPrefix(ip, 0.08, reason);
         }
+
+        // v2.3: 本服命令自适应学习 —— 实锤bot用过的注册类命令直接学进库,
+        // 移植到其他服务器/AuthMe变体/模组登录插件也能自动掌握
+        if (plugin.config().autoLearnAuthCommands && t != null && t.lastRandomArgs
+                && t.lastRoot != null && !t.lastRoot.isEmpty()) {
+            plugin.library().learnAuthCommand(t.lastRoot, "实锤bot自动学习");
+        }
+
+        // v2.3: 在线小模型训练(实锤=正样本)
+        plugin.scoreEngine().learnBot(name);
 
         // 踢出(实体线程)
         FoliaBridge.runEntity(plugin, p, () -> {

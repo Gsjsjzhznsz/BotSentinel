@@ -28,6 +28,7 @@ public class BotSentinelPlugin extends JavaPlugin {
     private Config configWrapper;
     private LibraryStore library;
     private StatsStore stats;
+    private ScoreEngine scoreEngine;
     private RiskScorer scorer;
     private IpRiskTracker ipTracker;
     private AlertBus alert;
@@ -42,6 +43,11 @@ public class BotSentinelPlugin extends JavaPlugin {
         this.library = new LibraryStore(new File(getDataFolder(), "library.json").toPath());
         this.stats = new StatsStore(new File(getDataFolder(), "stats.json").toPath());
         this.library.configure(configWrapper.decayDays, configWrapper.removeBelow);
+        this.scoreEngine = new ScoreEngine(new File(getDataFolder(), "model.json").toPath());
+        this.scoreEngine.configure(configWrapper.scoringEngine,
+                configWrapper.scoringWHeuristic, configWrapper.scoringWMarkov,
+                configWrapper.scoringWEntropy, configWrapper.scoringWLogistic,
+                configWrapper.scoringOnlineLearn);
         this.scorer = new RiskScorer(this);
         this.ipTracker = new IpRiskTracker(this);
         this.alert = new AlertBus(this);
@@ -73,29 +79,33 @@ public class BotSentinelPlugin extends JavaPlugin {
             stats.saveIfDirtyAsync();
             ipTracker.cleanup();
         });
-        // 置信度衰减 + 清理 + 归属地库自动更新: 每6小时
+        // 置信度衰减 + 清理 + 归属地库自动更新 + 小模型落盘: 每6小时
         FoliaBridge.runAsyncTimer(this, 6 * 3600_000L, 6 * 3600_000L, () -> {
             int removed = library.decayAndCleanup();
             if (removed > 0) alert.info("[特征库] 衰减清理完成, 移除过期特征 " + removed + " 条");
             geo.checkUpdate(false);
+            scoreEngine.flush();
         });
-
-        // 归属地库: 首次自动下载/加载(异步, 失败不影响启动)
-        if (configWrapper.geoEnabled) {
+        // 归属地库: v2.3 不管开关都自动下载/加载(开关只控制拦截判定), 失败自动重试
+        if (configWrapper.geoPreDownload) {
             FoliaBridge.runAsync(this, () -> geo.initAsync());
         }
 
+        // 短周期小模型落盘: 每5分钟(随库保存)
+        FoliaBridge.runAsyncTimer(this, saveMs, saveMs, scoreEngine::flush);
         // usercache 播种已登记玩家(异步)
         if (configWrapper.seedFromUsercache) {
             FoliaBridge.runAsync(this, this::seedFromUsercache);
         }
 
-        getLogger().info("BotSentinel v2.2 已启动 | 模式: " + (configWrapper.mode == Config.Mode.BLOCK ? "拦截" : "观察")
+        getLogger().info("BotSentinel v2.3 已启动 | 模式: " + (configWrapper.mode == Config.Mode.BLOCK ? "拦截" : "观察")
                 + " | 内核: " + FoliaBridge.kernelName()
+                + " | 评分: " + scoreEngine.engineName()
                 + " | 特征库: 假人名" + library.botNameCount() + " 形态" + library.shapeCount()
                 + " 签名" + library.signatureCount() + " 风险IP" + library.botIpCount()
                 + " 已登记" + library.knownPlayerCount()
-                + " | 地区拦截: " + (configWrapper.geoEnabled ? "开启" : "关闭"));
+                + " | 地区拦截: " + (configWrapper.geoEnabled ? "开启" : "关闭")
+                + "(库" + (configWrapper.geoPreDownload ? "自动准备" : "按需") + ")");
     }
 
     @Override
@@ -103,22 +113,29 @@ public class BotSentinelPlugin extends JavaPlugin {
         // 判空保护: 即使 onEnable 阶段出错也不会连环报错
         if (library != null) library.forceSave();
         if (stats != null) stats.forceSave();
+        if (scoreEngine != null) scoreEngine.flush();
         if (joinSentinel != null) joinSentinel.shutdownCleanup();
         getLogger().info("BotSentinel 已关闭, 特征库与统计已保存");
     }
 
-    /** reload 后重挂 geo 配置(/atb reload 调用) */
+    /** reload 后重挂 geo/引擎配置(/atb reload 调用) */
     public void reconfigureGeo() {
         geo.configure(configWrapper.geoEnabled, configWrapper.geoMainlandOnly,
                 configWrapper.geoBlockedRegions, configWrapper.geoAllowedRegions,
                 configWrapper.geoAllowIps, configWrapper.geoUpdateDays);
-        if (configWrapper.geoEnabled) FoliaBridge.runAsync(this, () -> geo.initAsync());
+        // geo.pre-download 意图: 打开后若库未就绪则补下载
+        if (configWrapper.geoPreDownload) FoliaBridge.runAsync(this, () -> geo.initAsync());
+        scoreEngine.configure(configWrapper.scoringEngine,
+                configWrapper.scoringWHeuristic, configWrapper.scoringWMarkov,
+                configWrapper.scoringWEntropy, configWrapper.scoringWLogistic,
+                configWrapper.scoringOnlineLearn);
     }
 
     /** 从 usercache.json 播种已登记玩家(弱信任), 自动过滤随机名bot */
     private void seedFromUsercache() {
         try {
-            Path serverRoot = getDataFolder().getParentFile().getParentFile().toPath();
+            // v2.3 修复: Lophine 下 getDataFolder 的父链可能为空导致 NPE, 优先用服务器根目录
+            Path serverRoot = resolveServerRoot();
             Path cache = serverRoot.resolve("usercache.json");
             if (!Files.exists(cache)) {
                 alert.info("[特征库] 未找到 usercache.json, 跳过播种(真人名单将随运行自动积累)");
@@ -142,6 +159,23 @@ public class BotSentinelPlugin extends JavaPlugin {
         } catch (Exception e) {
             getLogger().warning("[特征库] usercache播种失败: " + e.getMessage());
         }
+    }
+
+    /** 服务器根目录解析(多级回退, 修复 v2.2 usercache NPE) */
+    private Path resolveServerRoot() {
+        try {
+            Path wc = getServer().getWorldContainer().toPath();
+            if (wc != null) return wc;
+        } catch (Throwable ignored) {}
+        try {
+            File p1 = getDataFolder().getParentFile();
+            if (p1 != null) {
+                File p2 = p1.getParentFile();
+                if (p2 != null) return p2.toPath();
+                return p1.toPath();
+            }
+        } catch (Throwable ignored) {}
+        return java.nio.file.Paths.get(System.getProperty("user.dir"));
     }
 
     // ---------- 供组件调用的公共逻辑 ----------
@@ -206,6 +240,7 @@ public class BotSentinelPlugin extends JavaPlugin {
 
     public boolean pardonHuman(String name) { return library.pardonHuman(name); }
 
+    public ScoreEngine scoreEngine() { return scoreEngine; }
     public Config.Mode mode() { return configWrapper.mode; }
     public Config config() { return configWrapper; }
     public LibraryStore library() { return library; }
