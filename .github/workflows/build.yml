@@ -65,7 +65,8 @@ jobs:
             # 1.20.1~1.20.4=12001~12004, 1.20.5+=12005, 1.21.5=12105, 26.x=260100+
             if   [ "$num" -lt 12005 ]; then java=17; loom="1.9.2";            gradle="$GRADLE_FOR_OLD"
             elif [ "$num" -lt 12105 ]; then java=21; loom="1.9.2";            gradle="$GRADLE_FOR_OLD"
-            elif [ "$num" -lt 260000 ]; then java=21; loom="1.10.1";          gradle="$GRADLE_FOR_OLD"
+            elif [ "$num" -lt 12109 ]; then java=21; loom="1.10.1";           gradle="$GRADLE_FOR_OLD"
+            elif [ "$num" -lt 260000 ]; then java=21; loom="1.11.1";          gradle="$GRADLE_FOR_OLD"
             else                            java=25; loom="1.11-SNAPSHOT";    gradle="$GRADLE_FOR_NEW"
             fi
             # ---- yarn 映射实时解析(版本不存在则跳过) ----
