@@ -64,7 +64,7 @@ public final class SentinelState {
         geo.configure(config.geoEnabled, config.geoMainlandOnly, config.geoBlockedRegions,
                 config.geoAllowedRegions, config.geoAllowIps, config.geoUpdateDays);
         geo.initAsync(); // v2.3: 不管开关都准备本地库
-        log("BotSentinel v2.3 (Forge) 已加载 | 评分: " + scoreEngine.engineName() | 模式: " + config.mode
+        log("BotSentinel v2.3 (Forge) 已加载 | 评分: " + scoreEngine.engineName() + " | 模式: " + config.mode
                 + " | 特征库: 假人名" + library.botNameCount() + " 形态" + library.shapeCount()
                 + " 签名" + library.signatureCount() + " 风险IP" + library.botIpCount()
                 + " | 地区拦截: " + (config.geoEnabled ? "开启" : "关闭"));
